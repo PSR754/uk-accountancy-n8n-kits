@@ -48,7 +48,7 @@ rest will follow. The other nine are as first written and have known defects.
 | | Kit 04 | Kits 01-03, 05-10 |
 |---|---|---|
 | Decision logic | One pure function, no I/O, never throws | Spread across Code nodes and expressions |
-| Tests | 80, no credentials needed | None |
+| Tests | 91, no credentials needed | None |
 | `workflow.json` | Generated from the tested source; CI fails on drift | Hand-written |
 | Static checks | Passes | 38 errors, 52 warnings between them |
 
