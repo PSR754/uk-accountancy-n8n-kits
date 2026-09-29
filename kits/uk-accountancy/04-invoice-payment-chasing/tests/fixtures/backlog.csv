@@ -1,0 +1,3 @@
+Invoice Number,Client,Client Email,Client Type,Amount GBP,Due Date,Status,Last Chase Stage,Last Chased On,Activation Date
+INV-4001,Ancient Debt Ltd,ap@ancient.co.uk,Business,2500.00,2026-01-15,Unpaid,,,2026-09-15
+INV-4002,Old Debt Ltd,ap@old.co.uk,Business,700.00,2026-05-20,Unpaid,,,2026-09-15

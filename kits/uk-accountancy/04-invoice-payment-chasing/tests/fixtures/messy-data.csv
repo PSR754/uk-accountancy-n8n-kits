@@ -1,0 +1,13 @@
+Invoice Number,Client,Client Email,Client Type,Amount GBP,Due Date,Status,Last Chase Stage,Last Chased On,Activation Date
+INV-2001,Pound Signs Ltd,ap@poundsigns.co.uk,Business,"£1,250.00",2026-08-01,Unpaid,,,2026-07-01
+INV-2002,UK Dates Ltd,ap@ukdates.co.uk,Business,640,05/09/2026,Unpaid,,,2026-07-01
+INV-2003,No Email Ltd,,Business,500.00,2026-08-01,Unpaid,,,2026-07-01
+INV-2004,Bad Amount Ltd,ap@badamount.co.uk,Business,not a number,2026-08-01,Unpaid,,,2026-07-01
+INV-2005,Bad Date Ltd,ap@baddate.co.uk,Business,500.00,31/02/2026,Unpaid,,,2026-07-01
+,No Number Ltd,ap@nonumber.co.uk,Business,500.00,2026-08-01,Unpaid,,,2026-07-01
+INV-2007,Bad Status Ltd,ap@badstatus.co.uk,Business,500.00,2026-08-01,Pending,,,2026-07-01
+INV-2008,No Type Ltd,ap@notype.co.uk,,500.00,2026-08-01,Unpaid,,,2026-07-01
+INV-2009,Lower Case Ltd,ap@lowercase.co.uk,business,500.00,2026-08-01,unpaid,,,2026-07-01
+INV-2010,Spaces Ltd,  ap@spaces.co.uk  ,Business , 500.00 ,2026-08-01, Unpaid ,,,2026-07-01
+INV-2011,Zero Ltd,ap@zero.co.uk,Business,0.00,2026-08-01,Unpaid,,,2026-07-01
+INV-2012,Accounting Neg,ap@neg.co.uk,Business,"(500.00)",2026-08-01,Unpaid,,,2026-07-01

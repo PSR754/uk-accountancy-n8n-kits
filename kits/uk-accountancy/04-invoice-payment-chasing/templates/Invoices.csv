@@ -1,0 +1,3 @@
+Invoice Number,Client,Client Email,Client Type,Amount GBP,Due Date,Status,Last Chase Stage,Last Chased On,Activation Date
+INV-0001,Example Client Ltd,accounts@exampleclient.co.uk,Business,1250.00,2026-09-01,Unpaid,,,2026-09-15
+INV-0002,Jane Example,jane@example.com,Individual,320.00,2026-09-10,Unpaid,,,2026-09-15

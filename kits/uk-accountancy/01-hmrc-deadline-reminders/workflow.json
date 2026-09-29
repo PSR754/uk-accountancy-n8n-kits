@@ -1,0 +1,163 @@
+{
+  "name": "HMRC Filing Deadline Reminder System",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "name": "Daily Trigger 07:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.HMRC_CLIENT_LIST_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Deadlines"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0002-4000-8000-000000000002",
+      "name": "Read Client Deadlines (Google Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Expect columns: Client Name, Deadline Type, Due Date, Contact Email, Status, Last Reminder Sent\nconst today = new Date();\ntoday.setHours(0,0,0,0);\n\nconst results = [];\nfor (const item of $input.all()) {\n  const row = item.json;\n  const dueDate = new Date(row['Due Date']);\n  if (isNaN(dueDate.getTime())) continue;\n  dueDate.setHours(0,0,0,0);\n\n  const msPerDay = 1000 * 60 * 60 * 24;\n  const daysUntilDue = Math.round((dueDate - today) / msPerDay);\n\n  // Reminder milestones we care about\n  const milestones = [30, 14, 7, 1];\n  const isMilestone = milestones.includes(daysUntilDue);\n\n  const lastReminder = row['Last Reminder Sent'] ? String(row['Last Reminder Sent']) : '';\n  const alreadySentForThisMilestone = lastReminder === String(daysUntilDue);\n\n  results.push({\n    json: {\n      ...row,\n      daysUntilDue,\n      isMilestone,\n      alreadySentForThisMilestone,\n      shouldSendReminder: isMilestone && !alreadySentForThisMilestone && row['Status'] !== 'Filed' && row['Status'] !== 'Cancelled'\n    }\n  });\n}\nreturn results;"
+      },
+      "id": "a1b2c3d4-0003-4000-8000-000000000003",
+      "name": "Compute Days Until Due",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.shouldSendReminder }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0004-4000-8000-000000000004",
+      "name": "Filter: Due For Reminder",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build staged, deadline-specific email copy based on daysUntilDue and Deadline Type\nconst results = [];\nfor (const item of $input.all()) {\n  const row = item.json;\n  const days = row.daysUntilDue;\n  const type = row['Deadline Type'];\n  const client = row['Client Name'];\n  const due = row['Due Date'];\n\n  let urgency = 'Reminder';\n  if (days <= 1) urgency = 'FINAL REMINDER – Due Tomorrow';\n  else if (days <= 7) urgency = 'Urgent Reminder';\n  else if (days <= 14) urgency = 'Reminder';\n  else urgency = 'Advance Notice';\n\n  const subject = `${urgency}: ${type} due for ${client} on ${due}`;\n  const body = `Hi ${client},\\n\\n` +\n    `This is a reminder that your ${type} deadline with HMRC is due on ${due} (${days} day${days === 1 ? '' : 's'} from now).\\n\\n` +\n    `Please make sure any outstanding information or records are sent to us as soon as possible so we can file on time and avoid any late filing or late payment penalties.\\n\\n` +\n    `If you have already sent everything through, thank you – you can disregard this message.\\n\\n` +\n    `Kind regards,\\nYour Accountancy Team`;\n\n  results.push({ json: { ...row, emailSubject: subject, emailBody: body } });\n}\nreturn results;"
+      },
+      "id": "a1b2c3d4-0005-4000-8000-000000000005",
+      "name": "Draft Reminder Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SENDER_EMAIL }}",
+        "toEmail": "={{ $json['Contact Email'] }}",
+        "subject": "={{ $json.emailSubject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.emailBody }}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0006-4000-8000-000000000006",
+      "name": "Send Reminder Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1400, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.HMRC_CLIENT_LIST_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Deadlines"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["Client Name", "Deadline Type", "Due Date"],
+          "value": {
+            "Client Name": "={{ $json['Client Name'] }}",
+            "Deadline Type": "={{ $json['Deadline Type'] }}",
+            "Due Date": "={{ $json['Due Date'] }}",
+            "Last Reminder Sent": "={{ $json.daysUntilDue }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0007-4000-8000-000000000007",
+      "name": "Update Sheet Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1640, 300]
+    }
+  ],
+  "connections": {
+    "Daily Trigger 07:00": {
+      "main": [[{ "node": "Read Client Deadlines (Google Sheets)", "type": "main", "index": 0 }]]
+    },
+    "Read Client Deadlines (Google Sheets)": {
+      "main": [[{ "node": "Compute Days Until Due", "type": "main", "index": 0 }]]
+    },
+    "Compute Days Until Due": {
+      "main": [[{ "node": "Filter: Due For Reminder", "type": "main", "index": 0 }]]
+    },
+    "Filter: Due For Reminder": {
+      "main": [[{ "node": "Draft Reminder Content", "type": "main", "index": 0 }]]
+    },
+    "Draft Reminder Content": {
+      "main": [[{ "node": "Send Reminder Email", "type": "main", "index": 0 }]]
+    },
+    "Send Reminder Email": {
+      "main": [[{ "node": "Update Sheet Status", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "id": "hmrc-deadline-reminders-001",
+  "tags": ["uk-accountancy", "hmrc", "deadlines"]
+}

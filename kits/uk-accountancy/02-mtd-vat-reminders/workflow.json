@@ -1,0 +1,238 @@
+{
+  "name": "Making Tax Digital (MTD) VAT Reminder & Checklist",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "b2c3d4e5-0001-4000-8000-000000000001",
+      "name": "Daily Trigger 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.MTD_VAT_CLIENTS_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "VAT Clients"
+        },
+        "options": {}
+      },
+      "id": "b2c3d4e5-0002-4000-8000-000000000002",
+      "name": "Read VAT Client List (Google Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Expect columns: Client Name, Contact Email, VAT Quarter End, Submitted, Last Checklist Sent\nconst today = new Date();\ntoday.setHours(0,0,0,0);\nconst msPerDay = 1000 * 60 * 60 * 24;\n\nconst results = [];\nfor (const item of $input.all()) {\n  const row = item.json;\n  const quarterEnd = new Date(row['VAT Quarter End']);\n  if (isNaN(quarterEnd.getTime())) continue;\n\n  // MTD VAT deadline: 1 calendar month + 7 days after the end of the VAT period\n  const submissionDeadline = new Date(quarterEnd);\n  submissionDeadline.setMonth(submissionDeadline.getMonth() + 1);\n  submissionDeadline.setDate(submissionDeadline.getDate() + 7);\n\n  const daysUntilDeadline = Math.round((submissionDeadline - today) / msPerDay);\n\n  results.push({\n    json: {\n      ...row,\n      submissionDeadline: submissionDeadline.toISOString().slice(0, 10),\n      daysUntilDeadline\n    }\n  });\n}\nreturn results;"
+      },
+      "id": "b2c3d4e5-0003-4000-8000-000000000003",
+      "name": "Calculate Submission Deadline",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.Submitted }}",
+              "rightValue": "Yes",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "cond-2",
+              "leftValue": "={{ [21, 14, 7, 3].includes($json.daysUntilDeadline) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b2c3d4e5-0004-4000-8000-000000000004",
+      "name": "Filter: Checklist Due",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = [];\nfor (const item of $input.all()) {\n  const row = item.json;\n  const subject = `MTD VAT Checklist – ${row['Client Name']} – Submission due ${row.submissionDeadline}`;\n  const body = `Hi ${row['Client Name']},\\n\\n` +\n    `Your VAT return for the period ending ${row['VAT Quarter End']} is due for submission to HMRC via Making Tax Digital by ${row.submissionDeadline} (${row.daysUntilDeadline} days from now).\\n\\n` +\n    `Before we submit, please confirm the following:\\n` +\n    `  [ ] Digital records are up to date in your bridging/MTD software\\n` +\n    `  [ ] All sales and purchase invoices for the period have been entered\\n` +\n    `  [ ] Bank transactions are reconciled\\n` +\n    `  [ ] VAT figures (Boxes 1-9) have been reviewed for accuracy\\n` +\n    `  [ ] Any partial exemption or VAT scheme adjustments are applied\\n\\n` +\n    `Please reply to confirm the above or let us know if anything is outstanding.\\n\\n` +\n    `Kind regards,\\nYour Accountancy Team`;\n  results.push({ json: { ...row, emailSubject: subject, emailBody: body } });\n}\nreturn results;"
+      },
+      "id": "b2c3d4e5-0005-4000-8000-000000000005",
+      "name": "Build Checklist Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SENDER_EMAIL }}",
+        "toEmail": "={{ $json['Contact Email'] }}",
+        "subject": "={{ $json.emailSubject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.emailBody }}",
+        "options": {}
+      },
+      "id": "b2c3d4e5-0006-4000-8000-000000000006",
+      "name": "Send Checklist Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1400, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.MTD_VAT_CLIENTS_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "VAT Clients"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["Client Name", "VAT Quarter End"],
+          "value": {
+            "Client Name": "={{ $json['Client Name'] }}",
+            "VAT Quarter End": "={{ $json['VAT Quarter End'] }}",
+            "Last Checklist Sent": "={{ $json.daysUntilDeadline }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "b2c3d4e5-0007-4000-8000-000000000007",
+      "name": "Log Checklist Sent",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1640, 220]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-3",
+              "leftValue": "={{ $json.Submitted }}",
+              "rightValue": "Yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b2c3d4e5-0008-4000-8000-000000000008",
+      "name": "Filter: Newly Submitted",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [920, 460]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.MTD_VAT_CLIENTS_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Submission Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["Client Name", "VAT Quarter End"],
+          "value": {
+            "Client Name": "={{ $json['Client Name'] }}",
+            "VAT Quarter End": "={{ $json['VAT Quarter End'] }}",
+            "Confirmed Submitted On": "={{ $today.toISODate() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "b2c3d4e5-0009-4000-8000-000000000009",
+      "name": "Log Submission Confirmation",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1160, 460]
+    }
+  ],
+  "connections": {
+    "Daily Trigger 08:00": {
+      "main": [[{ "node": "Read VAT Client List (Google Sheets)", "type": "main", "index": 0 }]]
+    },
+    "Read VAT Client List (Google Sheets)": {
+      "main": [[{ "node": "Calculate Submission Deadline", "type": "main", "index": 0 }]]
+    },
+    "Calculate Submission Deadline": {
+      "main": [
+        [
+          { "node": "Filter: Checklist Due", "type": "main", "index": 0 },
+          { "node": "Filter: Newly Submitted", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Filter: Checklist Due": {
+      "main": [[{ "node": "Build Checklist Email", "type": "main", "index": 0 }]]
+    },
+    "Build Checklist Email": {
+      "main": [[{ "node": "Send Checklist Email", "type": "main", "index": 0 }]]
+    },
+    "Send Checklist Email": {
+      "main": [[{ "node": "Log Checklist Sent", "type": "main", "index": 0 }]]
+    },
+    "Filter: Newly Submitted": {
+      "main": [[{ "node": "Log Submission Confirmation", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "id": "mtd-vat-reminders-002",
+  "tags": ["uk-accountancy", "vat", "mtd"]
+}

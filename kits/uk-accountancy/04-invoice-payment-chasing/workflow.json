@@ -1,0 +1,863 @@
+{
+  "name": "UK Invoice Payment Chasing (GBP)",
+  "nodes": [
+    {
+      "id": "trigger-preview",
+      "name": "Preview Schedule 08:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -460,
+        -160
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 8 * * 1-5"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "set-preview",
+      "name": "Mode Preview",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -260,
+        -160
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "m",
+              "name": "mode",
+              "value": "preview",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "trigger-send",
+      "name": "Send Schedule 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -460,
+        40
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1-5"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "set-send",
+      "name": "Mode Send",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -260,
+        40
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "m",
+              "name": "mode",
+              "value": "send",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "build-config",
+      "name": "Build Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        -60
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// GENERATED FILE. Do not edit this node in the n8n editor.\n// Source: kits/uk-accountancy/04-invoice-payment-chasing/src/core/\n// Rebuild with `npm run build`. CI fails if this drifts from the source.\n\n// Everything behavioural lives here, in one visible place, rather than being\n// read from the environment inside individual nodes. n8n Cloud does not expose\n// $env to Code nodes, so a kit that depends on it cannot run there at all.\n// Change a value here, or override it from the workflow's own settings.\n\nconst env = (k, fallback) => {\n  try { return $env[k] !== undefined && $env[k] !== '' ? $env[k] : fallback; }\n  catch (e) { return fallback; }\n};\n\nconst config = {\n  firmName: env('FIRM_NAME', 'Your Firm'),\n  senderName: env('SENDER_NAME', 'Accounts'),\n  senderEmail: env('SENDER_EMAIL', 'accounts@example.co.uk'),\n  replyToEmail: env('REPLY_TO_EMAIL', env('SENDER_EMAIL', 'accounts@example.co.uk')),\n  firmPhone: env('FIRM_PHONE', ''),\n  signOffName: env('SIGN_OFF_NAME', ''),\n  paymentInstructions: env('PAYMENT_INSTRUCTIONS', ''),\n\n  thresholds: {\n    friendly: Number(env('CHASE_FRIENDLY_DAYS', 7)),\n    firm: Number(env('CHASE_FIRM_DAYS', 30)),\n    final: Number(env('CHASE_FINAL_DAYS', 60)),\n  },\n  minDaysBetweenChases: Number(env('MIN_DAYS_BETWEEN_CHASES', 7)),\n  maxEmailsPerRun: Number(env('MAX_EMAILS_PER_RUN', 50)),\n\n  sendOnWeekends: env('SEND_ON_WEEKENDS', 'false') === 'true',\n  sendOnBankHolidays: env('SEND_ON_BANK_HOLIDAYS', 'false') === 'true',\n  mentionLpcda: env('MENTION_LATE_PAYMENT_ACT', 'true') === 'true',\n\n  // SAFETY. While this is true, no client can receive anything: every email is\n  // delivered to dryRunRecipient instead. Leave it on until a full week of\n  // previews has been read and judged correct.\n  dryRun: env('DRY_RUN', 'true') !== 'false',\n  dryRunRecipient: env('DRY_RUN_RECIPIENT', env('PRACTICE_EMAIL', '')),\n};\n\n// The run date is taken in Europe/London, so a run just after midnight UTC in\n// summer is not attributed to the previous day.\nconst today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });\n\nconst mode = $json.mode || 'send';\n\nreturn [{ json: {\n  mode,\n  today,\n  config,\n  practiceEmail: env('PRACTICE_EMAIL', ''),\n  holdUrl: env('HOLD_URL', ''),\n} }];"
+      }
+    },
+    {
+      "id": "read-invoices",
+      "name": "Read Invoices",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        180,
+        -60
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.INVOICE_TRACKER_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Invoices"
+        },
+        "options": {
+          "returnFirstMatch": false
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "read-sent-log",
+      "name": "Read Sent Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        180,
+        120
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.INVOICE_TRACKER_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sent Log"
+        },
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "read-control",
+      "name": "Read Run Control",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        180,
+        300
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.INVOICE_TRACKER_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Run Control"
+        },
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "plan",
+      "name": "Plan Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        -60
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// GENERATED FILE. Do not edit this node in the n8n editor.\n// Source: kits/uk-accountancy/04-invoice-payment-chasing/src/core/\n// Rebuild with `npm run build`. CI fails if this drifts from the source.\n\n// ---- dates.js ----\n// Date handling. All dates are date-only ISO strings 'YYYY-MM-DD'.\n// All arithmetic is done in UTC so the host timezone can never shift a day.\n\nconst ISO_RE = /^(\\d{4})-(\\d{2})-(\\d{2})$/;\nconst UK_RE = /^(\\d{1,2})[\\/\\-.](\\d{1,2})[\\/\\-.](\\d{4})$/;\nconst MS_PER_DAY = 86400000;\n\n/** Build a UTC timestamp from y/m/d, or null if the calendar date is not real. */\nfunction utcFromParts(y, m, d) {\n  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return null;\n  if (m < 1 || m > 12 || d < 1 || d > 31) return null;\n  const ts = Date.UTC(y, m - 1, d);\n  const dt = new Date(ts);\n  // Rejects 31 February style overflow, which JS would otherwise roll forward.\n  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;\n  return ts;\n}\n\n/** Format a UTC timestamp as 'YYYY-MM-DD'. */\nfunction toISO(ts) {\n  const d = new Date(ts);\n  const p = (n) => String(n).padStart(2, '0');\n  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;\n}\n\n/**\n * Parse a value that came out of a spreadsheet cell into 'YYYY-MM-DD'.\n * Accepts ISO strings, UK dd/mm/yyyy, JS Dates and Google Sheets serial numbers.\n * Returns null rather than guessing when the value is ambiguous or invalid.\n * Never uses `new Date(string)`, whose parsing of '05/09/2026' is locale-dependent.\n */\nfunction parseSheetDate(value) {\n  if (value === null || value === undefined) return null;\n\n  if (value instanceof Date) {\n    if (Number.isNaN(value.getTime())) return null;\n    return toISO(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));\n  }\n\n  // Google Sheets serial: days since 1899-12-30.\n  if (typeof value === 'number') {\n    if (!Number.isFinite(value) || value < 1 || value > 100000) return null;\n    return toISO(Date.UTC(1899, 11, 30) + Math.floor(value) * MS_PER_DAY);\n  }\n\n  const s = String(value).trim();\n  if (s === '') return null;\n\n  const iso = ISO_RE.exec(s);\n  if (iso) {\n    const ts = utcFromParts(+iso[1], +iso[2], +iso[3]);\n    return ts === null ? null : toISO(ts);\n  }\n\n  const uk = UK_RE.exec(s);\n  if (uk) {\n    const ts = utcFromParts(+uk[3], +uk[2], +uk[1]);\n    return ts === null ? null : toISO(ts);\n  }\n\n  return null;\n}\n\n/** Timestamp for an ISO date string, or null. */\nfunction tsOf(isoDate) {\n  const m = ISO_RE.exec(String(isoDate ?? '').trim());\n  if (!m) return null;\n  return utcFromParts(+m[1], +m[2], +m[3]);\n}\n\n/** Whole days from `from` to `to`. Positive when `to` is later. */\nfunction daysBetween(fromISO, toISOdate) {\n  const a = tsOf(fromISO);\n  const b = tsOf(toISOdate);\n  if (a === null || b === null) return null;\n  return Math.round((b - a) / MS_PER_DAY);\n}\n\nfunction addDays(isoDate, n) {\n  const ts = tsOf(isoDate);\n  if (ts === null) return null;\n  return toISO(ts + n * MS_PER_DAY);\n}\n\n/** 0 = Sunday .. 6 = Saturday */\nfunction dayOfWeek(isoDate) {\n  const ts = tsOf(isoDate);\n  return ts === null ? null : new Date(ts).getUTCDay();\n}\n\nfunction isWeekend(isoDate) {\n  const d = dayOfWeek(isoDate);\n  return d === 0 || d === 6;\n}\n\nfunction isBankHoliday(isoDate, holidays) {\n  return Array.isArray(holidays) && holidays.includes(isoDate);\n}\n\n/** Is this date inside a configured quiet period such as the Christmas shutdown? */\nfunction inQuietPeriod(isoDate, quietPeriods) {\n  if (!Array.isArray(quietPeriods)) return false;\n  const m = ISO_RE.exec(String(isoDate));\n  if (!m) return false;\n  const md = `${m[2]}-${m[3]}`;\n  return quietPeriods.some((p) => {\n    // A period may wrap the year end, e.g. 12-24 to 01-02.\n    if (p.from <= p.to) return md >= p.from && md <= p.to;\n    return md >= p.from || md <= p.to;\n  });\n}\n\n/**\n * A day on which client email may be sent.\n * Returns { sendable: boolean, reason: string|null }.\n */\nfunction sendableDay(isoDate, config) {\n  if (tsOf(isoDate) === null) return { sendable: false, reason: 'invalid run date' };\n  if (config.sendOnWeekends !== true && isWeekend(isoDate)) {\n    return { sendable: false, reason: 'weekend' };\n  }\n  if (config.sendOnBankHolidays !== true && isBankHoliday(isoDate, config.bankHolidays)) {\n    return { sendable: false, reason: 'bank holiday' };\n  }\n  if (inQuietPeriod(isoDate, config.quietPeriods)) {\n    return { sendable: false, reason: 'quiet period' };\n  }\n  return { sendable: true, reason: null };\n}\n\n/** 'Wednesday 14 October 2026' — how a UK client reads a date. */\nfunction formatUKDate(isoDate) {\n  const ts = tsOf(isoDate);\n  if (ts === null) return String(isoDate ?? '');\n  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];\n  const months = ['January', 'February', 'March', 'April', 'May', 'June',\n    'July', 'August', 'September', 'October', 'November', 'December'];\n  const d = new Date(ts);\n  return `${days[d.getUTCDay()]} ${d.getUTCDate()} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}`;\n}\n\n// ---- money.js ----\n// Money is handled as integer pence throughout. Floating point never touches a total.\n\n/**\n * Parse a spreadsheet amount into integer pence.\n * Accepts numbers, and strings with currency symbols, thousands separators and spaces.\n * Returns null when the value is not a usable amount.\n */\nfunction parseGBP(value) {\n  if (value === null || value === undefined) return null;\n\n  if (typeof value === 'number') {\n    if (!Number.isFinite(value)) return null;\n    return Math.round(value * 100);\n  }\n\n  let s = String(value).trim();\n  if (s === '') return null;\n\n  let negative = false;\n  // Accounting notation: (1,250.00) means negative.\n  if (/^\\(.*\\)$/.test(s)) { negative = true; s = s.slice(1, -1); }\n\n  s = s.replace(/[£\\s,]/g, '');\n  if (s.startsWith('-')) { negative = true; s = s.slice(1); }\n\n  if (!/^\\d+(\\.\\d{1,2})?$/.test(s)) return null;\n\n  const pence = Math.round(Number(s) * 100);\n  if (!Number.isFinite(pence)) return null;\n  return negative ? -pence : pence;\n}\n\n/** '£1,250.00' */\nfunction formatGBP(pence) {\n  const neg = pence < 0;\n  const abs = Math.abs(Math.round(pence));\n  const pounds = Math.floor(abs / 100);\n  const rem = String(abs % 100).padStart(2, '0');\n  const withSeparators = String(pounds).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');\n  return `${neg ? '-' : ''}£${withSeparators}.${rem}`;\n}\n\n// ---- rules.js ----\n// Business rules with real-world consequences. Every constant here is cited in\n// ../../rules/RULES.md. Change a value there and in this file together, and\n// re-run the tests, which assert the cited values.\n\nconst STAGES = ['friendly', 'firm', 'final'];\n\n/** Rank of a chase stage. Unsent is 0, friendly 1, firm 2, final 3. */\nfunction stageRank(stage) {\n  if (!stage) return 0;\n  const i = STAGES.indexOf(String(stage).trim().toLowerCase());\n  return i === -1 ? 0 : i + 1;\n}\n\n/** Canonical stage name from a sheet cell, or null if it is not a known stage. */\nfunction normaliseStage(value) {\n  if (value === null || value === undefined) return null;\n  const s = String(value).trim().toLowerCase();\n  return STAGES.includes(s) ? s : null;\n}\n\n/**\n * The stage an invoice has reached, given how many days of chasing it has earned.\n * Returns null below the first threshold.\n */\nfunction stageFor(effectiveDays, thresholds) {\n  if (!Number.isFinite(effectiveDays)) return null;\n  if (effectiveDays >= thresholds.final) return 'final';\n  if (effectiveDays >= thresholds.firm) return 'firm';\n  if (effectiveDays >= thresholds.friendly) return 'friendly';\n  return null;\n}\n\n/**\n * Days of chasing an invoice has earned.\n *\n * An invoice already long overdue when it first entered the system has not been\n * chased by us, so it must walk the ladder from the first rung rather than\n * arriving at a final notice that claims a history of reminders that never happened.\n * Capping the effective age at (days since activation + the first threshold) makes\n * an activation-day invoice start at `friendly` and reach each later stage at the\n * normal pace, while an invoice tracked from issue is governed by its real age.\n */\nfunction effectiveDays(daysOverdue, daysSinceActivation, thresholds) {\n  if (!Number.isFinite(daysOverdue)) return null;\n  if (!Number.isFinite(daysSinceActivation)) return daysOverdue;\n  const capped = daysSinceActivation + thresholds.friendly;\n  return Math.min(daysOverdue, capped);\n}\n\n/**\n * Fixed sum recoverable under the Late Payment of Commercial Debts (Interest)\n * Act 1998 s5A. Business-to-business debts only. Amount in integer pence.\n * Bands: under £1,000 => £40; £1,000 to £9,999.99 => £70; £10,000 and over => £100.\n */\nfunction lpcdaCompensationPence(amountPence) {\n  if (!Number.isFinite(amountPence) || amountPence <= 0) return 0;\n  if (amountPence < 100000) return 4000;\n  if (amountPence < 1000000) return 7000;\n  return 10000;\n}\n\n/** The Act applies to business-to-business contracts only. */\nfunction lpcdaApplies(clientType) {\n  return String(clientType ?? '').trim().toLowerCase() === 'business';\n}\n\nconst CLIENT_TYPES = ['business', 'individual'];\n\nfunction normaliseClientType(value) {\n  const s = String(value ?? '').trim().toLowerCase();\n  if (s === 'business' || s === 'b2b' || s === 'company') return 'business';\n  if (s === 'individual' || s === 'consumer' || s === 'person') return 'individual';\n  return null;\n}\n\n// Status values. Only `unpaid` is ever chased; the rest each stop chasing for\n// a different reason and are reported separately so nothing disappears silently.\nconst CHASEABLE_STATUS = 'unpaid';\nconst KNOWN_STATUSES = ['unpaid', 'paid', 'disputed', 'payment plan', 'written off'];\n\nfunction normaliseStatus(value) {\n  const s = String(value ?? '').trim().toLowerCase().replace(/\\s+/g, ' ');\n  if (s === '') return null;\n  if (s === 'outstanding' || s === 'open') return 'unpaid';\n  if (s === 'settled') return 'paid';\n  return KNOWN_STATUSES.includes(s) ? s : null;\n}\n\n// Deliberately conservative: enough to catch the blank and obviously broken\n// addresses that stop a send, without rejecting unusual but valid ones.\nconst EMAIL_RE = /^[^\\s@]+@[^\\s@.]+(\\.[^\\s@.]+)+$/;\n\nfunction isValidEmail(value) {\n  const s = String(value ?? '').trim();\n  return s.length > 0 && s.length <= 254 && EMAIL_RE.test(s);\n}\n\n// ---- copy.js ----\n/**\n * Build the client-facing email for one group of overdue invoices.\n *\n * Rules this copy obeys, each of which exists because getting it wrong has a\n * real cost to the practice:\n *  - The Late Payment of Commercial Debts (Interest) Act 1998 covers\n *    business-to-business debts only, so that paragraph never reaches an individual.\n *  - A final notice only refers to earlier reminders when earlier reminders were\n *    actually sent by this system. It never invents a history.\n *  - Every email says how to reach a person, and carries the fraud warning that\n *    makes a spoofed payment-details email easier for a client to spot.\n *  - One ask, stated plainly, with the amount and the date in the first lines.\n */\nfunction buildEmail({ clientName, clientType, invoices, stage, hasPriorChase, config }) {\n  const totalPence = invoices.reduce((sum, i) => sum + i.amountPence, 0);\n  const multiple = invoices.length > 1;\n  const oldest = invoices.reduce((a, b) => (a.daysOverdue >= b.daysOverdue ? a : b));\n\n  const lines = invoices.map(\n    (i) => `  ${i.invoiceNumber} — ${formatGBP(i.amountPence)} — due ${formatUKDate(i.dueDate)} (${i.daysOverdue} day${i.daysOverdue === 1 ? '' : 's'} overdue)`,\n  );\n  const schedule = lines.join('\\n');\n  const total = formatGBP(totalPence);\n  const greeting = `Dear ${clientName},`;\n\n  let subject;\n  let opening;\n  let ask;\n\n  if (stage === 'friendly') {\n    subject = multiple\n      ? `Reminder: ${invoices.length} invoices now overdue — ${total}`\n      : `Reminder: invoice ${oldest.invoiceNumber} is now overdue — ${total}`;\n    opening = multiple\n      ? `Our records show the following invoices are now past their due date:`\n      : `Our records show that this invoice is now past its due date:`;\n    ask = `If payment is already on its way, thank you and please ignore this message. Otherwise, please arrange payment when you can.`;\n  } else if (stage === 'firm') {\n    subject = multiple\n      ? `Action needed: ${invoices.length} overdue invoices — ${total}`\n      : `Action needed: invoice ${oldest.invoiceNumber} — ${total} overdue`;\n    opening = `The following ${multiple ? 'invoices remain' : 'invoice remains'} unpaid:`;\n    ask = `Please arrange payment within the next 7 days, or contact us if there is a reason for the delay or you would like to discuss a payment plan.`;\n  } else {\n    subject = multiple\n      ? `Final notice: ${invoices.length} overdue invoices — ${total}`\n      : `Final notice: invoice ${oldest.invoiceNumber} — ${total} overdue`;\n    opening = hasPriorChase\n      ? `Despite our earlier reminders, the following ${multiple ? 'invoices remain' : 'invoice remains'} unpaid:`\n      : `The following ${multiple ? 'invoices are' : 'invoice is'} significantly overdue:`;\n    ask = `Please settle the full amount within 7 days of this notice. If you are unable to, please contact us straight away so we can agree a way forward.`;\n  }\n\n  const parts = [greeting, '', opening, '', schedule, '', `Total outstanding: ${total}`, '', ask];\n\n  if (config.mentionLpcda && lpcdaApplies(clientType) && (stage === 'firm' || stage === 'final')) {\n    const comp = formatGBP(lpcdaCompensationPence(oldest.amountPence));\n    parts.push(\n      '',\n      `As these are business debts, we are entitled under the Late Payment of Commercial Debts (Interest) Act 1998 to claim statutory interest and a fixed sum of ${comp} per invoice. We would much rather resolve this without doing so.`,\n    );\n  }\n\n  if (config.paymentInstructions) {\n    parts.push('', 'How to pay:', config.paymentInstructions);\n  }\n\n  parts.push('', 'Kind regards,', config.signOffName || config.senderName, config.firmName);\n  parts.push('', '—', footer(config));\n\n  return { subject, body: parts.join('\\n') };\n}\n\nfunction footer(config) {\n  const contact = config.firmPhone\n    ? `If anything here looks wrong, please call us on ${config.firmPhone} before replying.`\n    : `If anything here looks wrong, please contact us before replying.`;\n  return [\n    `${config.firmName}`,\n    contact,\n    `We will never ask you to change the bank details you pay us into by email. If you receive such a request, telephone us on a number you already hold before acting on it.`,\n  ].join('\\n');\n}\n\n/** The internal pre-send digest: what will go out, and how to stop it. */\nfunction buildDigest({ actions, skipped, runDate, config, holdUrl }) {\n  const count = actions.length;\n  const totalPence = actions.reduce(\n    (s, a) => s + a.invoices.reduce((t, i) => t + i.amountPence, 0), 0,\n  );\n\n  const lines = actions.map((a) => {\n    const amount = formatGBP(a.invoices.reduce((t, i) => t + i.amountPence, 0));\n    const refs = a.invoices.map((i) => i.invoiceNumber).join(', ');\n    return `  ${a.stage.toUpperCase().padEnd(8)} ${a.clientName} — ${amount} (${refs}) → ${a.realRecipient}`;\n  });\n\n  const body = [\n    `Chase run for ${formatUKDate(runDate)}.`,\n    '',\n    count === 0\n      ? 'Nothing is due to be chased today. No emails will be sent.'\n      : `${count} email${count === 1 ? '' : 's'} will be sent at 09:00, covering ${formatGBP(totalPence)}:`,\n    count === 0 ? '' : '',\n    ...lines,\n    '',\n    config.dryRun\n      ? `DRY RUN IS ON. Nothing will reach a client. Every email above will be delivered to ${config.dryRunRecipient} instead.`\n      : `These will go to the real recipients above.`,\n  ];\n\n  if (count > 0 && holdUrl) {\n    body.push('', `To stop today's run, open this link before 09:00:`, holdUrl);\n  }\n\n  if (skipped.length) {\n    const grouped = {};\n    for (const s of skipped) grouped[s.reason] = (grouped[s.reason] || 0) + 1;\n    body.push('', 'Not chased today:');\n    for (const [reason, n] of Object.entries(grouped).sort()) {\n      body.push(`  ${n} × ${reason}`);\n    }\n  }\n\n  const needsAttention = skipped.filter((s) => s.needsAttention);\n  if (needsAttention.length) {\n    body.push('', 'Rows that need your attention in the sheet:');\n    for (const s of needsAttention) {\n      body.push(`  row ${s.rowNumber}: ${s.invoiceNumber || '(no invoice number)'} — ${s.reason}`);\n    }\n  }\n\n  return {\n    subject: `Chase preview: ${count} email${count === 1 ? '' : 's'} at 09:00${config.dryRun ? ' (dry run)' : ''}`,\n    body: body.join('\\n'),\n  };\n}\n\n// ---- config.js ----\n/**\n * Defaults for the chasing engine. Everything a practice would reasonably want\n * to change lives here, is passed in from the workflow's Config node, and is\n * covered by tests. Nothing behavioural is read from the environment directly.\n */\nconst DEFAULT_CONFIG = {\n  // Days overdue at which each stage becomes due.\n  thresholds: { friendly: 7, firm: 30, final: 60 },\n\n  // Never send two chase emails to the same client closer together than this.\n  minDaysBetweenChases: 7,\n\n  // Hard ceilings. A breach halts the run rather than sending, because the\n  // usual cause is a bad edit to the sheet rather than a genuine surge.\n  maxEmailsPerRun: 50,\n\n  // Sending calendar.\n  sendOnWeekends: false,\n  sendOnBankHolidays: false,\n  quietPeriods: [{ from: '12-24', to: '01-01' }],\n  bankHolidays: [\n  \"2026-01-01\", \"2026-04-03\", \"2026-04-06\", \"2026-05-04\",\n  \"2026-05-25\", \"2026-08-31\", \"2026-12-25\", \"2026-12-28\",\n  \"2027-01-01\", \"2027-03-26\", \"2027-03-29\", \"2027-05-03\",\n  \"2027-05-31\", \"2027-08-30\", \"2027-12-27\", \"2027-12-28\",\n  \"2028-01-03\", \"2028-04-14\", \"2028-04-17\", \"2028-05-01\",\n  \"2028-05-29\", \"2028-08-28\", \"2028-12-25\", \"2028-12-26\"\n],\n\n  // Identity and copy.\n  firmName: 'Your Firm',\n  senderName: 'Accounts',\n  senderEmail: 'accounts@example.co.uk',\n  replyToEmail: 'accounts@example.co.uk',\n  firmPhone: '',\n  signOffName: '',\n  paymentInstructions: '',\n\n  // State the statutory entitlement in firm and final emails to business clients.\n  mentionLpcda: true,\n\n  // Safety. While true, every client email is redirected to dryRunRecipient.\n  dryRun: true,\n  dryRunRecipient: '',\n};\n\nfunction withDefaults(config = {}) {\n  return {\n    ...DEFAULT_CONFIG,\n    ...config,\n    thresholds: { ...DEFAULT_CONFIG.thresholds, ...(config.thresholds || {}) },\n  };\n}\n\n// ---- plan.js ----\n/**\n * Decide everything this kit will do on a given day.\n *\n * This is the whole of the decision-making. It is a pure function: the same\n * rows and the same date always produce the same result, it performs no input\n * or output, and it never throws on bad data. The n8n workflow around it only\n * reads rows, delivers what this returns, and writes back what this says to write.\n *\n * @returns {{actions: Array, skipped: Array, writeBacks: Array, summary: Object}}\n */\nfunction plan({ rows, today, config: rawConfig, sentKeys = [] }) {\n  const alreadySent = new Set(\n    (Array.isArray(sentKeys) ? sentKeys : []).map((k) => String(k).trim()).filter(Boolean),\n  );\n  const config = withDefaults(rawConfig);\n  const skipped = [];\n  const summary = {\n    runDate: today,\n    rowsRead: Array.isArray(rows) ? rows.length : 0,\n    valid: 0,\n    overdue: 0,\n    due: 0,\n    grouped: 0,\n    emails: 0,\n    skipped: 0,\n    halted: false,\n    haltReason: null,\n    sendableDay: true,\n    notSendableReason: null,\n    dryRun: config.dryRun === true,\n  };\n\n  const day = sendableDay(today, config);\n  if (!day.sendable) {\n    summary.sendableDay = false;\n    summary.notSendableReason = day.reason;\n    summary.skipped = summary.rowsRead;\n    return {\n      actions: [],\n      writeBacks: [],\n      skipped: (rows || []).map((r, i) => ({\n        rowNumber: rowNumberOf(r, i),\n        invoiceNumber: String(r?.['Invoice Number'] ?? '').trim(),\n        reason: `not a sending day: ${day.reason}`,\n        needsAttention: false,\n      })),\n      summary,\n    };\n  }\n\n  if (config.dryRun === true && !isValidEmail(config.dryRunRecipient)) {\n    summary.halted = true;\n    summary.haltReason = 'dry run is on but no valid dryRunRecipient is configured';\n    return { actions: [], writeBacks: [], skipped: [], summary };\n  }\n\n  // 1. Validate and classify every row. Nothing is ever dropped silently.\n  const candidates = [];\n  for (const [i, raw] of (rows || []).entries()) {\n    const row = raw && typeof raw === 'object' ? raw : {};\n    const rowNumber = rowNumberOf(row, i);\n    const invoiceNumber = String(row['Invoice Number'] ?? '').trim();\n    const add = (reason, needsAttention) =>\n      skipped.push({ rowNumber, invoiceNumber, reason, needsAttention });\n\n    if (invoiceNumber === '') { add('no invoice number', true); continue; }\n\n    const status = normaliseStatus(row['Status']);\n    if (status === null) {\n      add(`unrecognised status \"${String(row['Status'] ?? '').trim()}\"`, true);\n      continue;\n    }\n\n    const amountPence = parseGBP(row['Amount GBP']);\n    if (amountPence === null) {\n      add(`amount is not a usable number \"${String(row['Amount GBP'] ?? '').trim()}\"`, true);\n      continue;\n    }\n\n    const dueDate = parseSheetDate(row['Due Date']);\n    if (dueDate === null) {\n      add(`due date is not a usable date \"${String(row['Due Date'] ?? '').trim()}\"`, true);\n      continue;\n    }\n\n    const clientType = normaliseClientType(row['Client Type']);\n    if (clientType === null) {\n      add(`client type must be Business or Individual, found \"${String(row['Client Type'] ?? '').trim()}\"`, true);\n      continue;\n    }\n\n    summary.valid += 1;\n\n    if (status !== CHASEABLE_STATUS) { add(`status is ${status}`, false); continue; }\n    if (amountPence <= 0) { add('amount is zero or negative', true); continue; }\n\n    const email = String(row['Client Email'] ?? '').trim();\n    if (!isValidEmail(email)) {\n      add(`client email is missing or invalid \"${email}\"`, true);\n      continue;\n    }\n\n    const daysOverdue = daysBetween(dueDate, today);\n    if (daysOverdue === null || daysOverdue <= 0) { add('not yet overdue', false); continue; }\n    summary.overdue += 1;\n\n    // An invoice with no activation date is treated as having entered the system\n    // today, which is the cautious reading: it starts at the first rung.\n    const activationDate = parseSheetDate(row['Activation Date']) ?? today;\n    const daysSinceActivation = Math.max(0, daysBetween(activationDate, today) ?? 0);\n\n    const earned = effectiveDays(daysOverdue, daysSinceActivation, config.thresholds);\n    const stage = stageFor(earned, config.thresholds);\n    if (stage === null) { add(`overdue ${daysOverdue} day(s), below the first chase threshold`, false); continue; }\n\n    const lastStage = normaliseStage(row['Last Chase Stage']);\n    if (stageRank(stage) <= stageRank(lastStage)) {\n      add(`${stage} already sent`, false);\n      continue;\n    }\n\n    const lastChasedOn = parseSheetDate(row['Last Chased On']);\n    if (lastChasedOn) {\n      const since = daysBetween(lastChasedOn, today);\n      if (since !== null && since < config.minDaysBetweenChases) {\n        add(`chased ${since} day(s) ago, minimum gap is ${config.minDaysBetweenChases}`, false);\n        continue;\n      }\n    }\n\n    // Belt and braces over the sheet's own Last Chase Stage: an append-only\n    // ledger of keys already sent. The sheet write can fail; this is what makes\n    // a crash between sending and writing back unable to produce a second copy.\n    const key = `${invoiceNumber}|${stage}`;\n    if (alreadySent.has(key)) { add(`${stage} already recorded as sent`, false); continue; }\n\n    summary.due += 1;\n    candidates.push({\n      rowNumber, invoiceNumber, email, clientType, amountPence, dueDate,\n      daysOverdue, stage, hasPriorChase: stageRank(lastStage) > 0,\n      clientName: String(row['Client'] ?? '').trim() || invoiceNumber,\n    });\n  }\n\n  // 2. One email per client contact, however many invoices they owe on.\n  const groups = new Map();\n  for (const c of candidates) {\n    const key = c.email.toLowerCase();\n    if (!groups.has(key)) groups.set(key, []);\n    groups.get(key).push(c);\n  }\n  summary.grouped = groups.size;\n\n  // 3. Build the emails, in a stable order so runs are reproducible.\n  const actions = [];\n  for (const [key, invoices] of [...groups.entries()].sort(([a], [b]) => (a < b ? -1 : 1))) {\n    invoices.sort((a, b) => b.daysOverdue - a.daysOverdue || (a.invoiceNumber < b.invoiceNumber ? -1 : 1));\n    const stage = invoices.reduce(\n      (best, i) => (stageRank(i.stage) > stageRank(best) ? i.stage : best), null,\n    );\n    const hasPriorChase = invoices.some((i) => i.hasPriorChase);\n    const first = invoices[0];\n    const { subject, body } = buildEmail({\n      clientName: first.clientName,\n      clientType: first.clientType,\n      invoices, stage, hasPriorChase, config,\n    });\n\n    const realRecipient = first.email;\n    actions.push({\n      clientName: first.clientName,\n      clientType: first.clientType,\n      realRecipient,\n      to: config.dryRun ? config.dryRunRecipient : realRecipient,\n      subject: config.dryRun ? `[DRY RUN → ${realRecipient}] ${subject}` : subject,\n      body,\n      stage,\n      invoices,\n      // One email per invoice per stage, for all time. The send step records\n      // this key and refuses a key it has already recorded, so a crash between\n      // sending and writing back can never produce a second copy.\n      idempotencyKeys: invoices.map((i) => `${i.invoiceNumber}|${i.stage}`),\n      groupKey: key,\n    });\n  }\n\n  // 4. Hard ceiling. A breach is nearly always a bad sheet edit, so halt rather\n  //    than send a partial batch that is hard to reason about afterwards.\n  if (actions.length > config.maxEmailsPerRun) {\n    summary.halted = true;\n    summary.haltReason =\n      `${actions.length} emails would be sent, which is above the limit of ${config.maxEmailsPerRun}. Nothing has been sent. Check the sheet, then raise the limit if the run is genuinely correct.`;\n    summary.emails = 0;\n    summary.skipped = skipped.length;\n    return { actions: [], writeBacks: [], skipped, summary };\n  }\n\n  const writeBacks = actions.flatMap((a) =>\n    a.invoices.map((i) => ({\n      rowNumber: i.rowNumber,\n      invoiceNumber: i.invoiceNumber,\n      lastChaseStage: i.stage,\n      lastChasedOn: today,\n      idempotencyKey: `${i.invoiceNumber}|${i.stage}`,\n    })),\n  );\n\n  summary.emails = actions.length;\n  summary.skipped = skipped.length;\n  return { actions, writeBacks, skipped, summary };\n}\n\nfunction rowNumberOf(row, index) {\n  const n = row && row.row_number;\n  return Number.isFinite(n) ? n : index + 2; // +2: header row, then 1-based\n}\n\n// ---- n8n entry point ----\nconst cfgItem = $('Build Config').first().json;\nconst config = { ...cfgItem.config };\nconst mode = cfgItem.mode;\nconst today = cfgItem.today;\n\nconst rows = $('Read Invoices').all().map((i) => i.json);\nlet sentKeys = [];\ntry {\n  sentKeys = $('Read Sent Log').all()\n    .map((i) => String(i.json['Idempotency Key'] ?? '').trim())\n    .filter(Boolean);\n} catch (e) {\n  sentKeys = [];\n}\n\nlet hold = null;\ntry {\n  const control = $('Read Run Control').all().map((i) => i.json);\n  hold = control.length ? String(control[0]['Hold Until'] ?? '').trim() : null;\n} catch (e) {\n  hold = null;\n}\n\nconst result = plan({ rows, today, config, sentKeys });\n\nif (hold && hold === today) {\n  result.summary.halted = true;\n  result.summary.haltReason = 'run held by the practice from the preview email';\n  result.actions = [];\n  result.writeBacks = [];\n}\n\nconst digest = buildDigest({\n  actions: result.actions,\n  skipped: result.skipped,\n  runDate: today,\n  config,\n  holdUrl: cfgItem.holdUrl,\n});\n\nreturn [{\n  json: {\n    mode,\n    today,\n    summary: result.summary,\n    skipped: result.skipped,\n    digestSubject: digest.subject,\n    digestBody: digest.body,\n    actionCount: result.actions.length,\n    sendable: result.summary.sendableDay && !result.summary.halted,\n  },\n  pairedItem: { item: 0 },\n}];"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "route",
+      "name": "Preview or Send",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        640,
+        -60
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c1",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.mode }}",
+                    "rightValue": "preview"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "preview"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c2",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.mode }}",
+                    "rightValue": "send"
+                  },
+                  {
+                    "id": "c3",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "leftValue": "={{ $json.sendable }}",
+                    "rightValue": ""
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "send"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "nothing to do"
+        }
+      }
+    },
+    {
+      "id": "send-digest",
+      "name": "Email Preview To Practice",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        900,
+        -240
+      ],
+      "parameters": {
+        "fromEmail": "={{ $('Build Config').first().json.config.senderEmail }}",
+        "toEmail": "={{ $('Build Config').first().json.practiceEmail }}",
+        "subject": "={{ $json.digestSubject }}",
+        "text": "={{ $json.digestBody }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "prepare",
+      "name": "Prepare Actions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        -20
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// GENERATED FILE. Do not edit this node in the n8n editor.\n// Source: kits/uk-accountancy/04-invoice-payment-chasing/src/core/\n// Rebuild with `npm run build`. CI fails if this drifts from the source.\n\n// ---- dates.js ----\n// Date handling. All dates are date-only ISO strings 'YYYY-MM-DD'.\n// All arithmetic is done in UTC so the host timezone can never shift a day.\n\nconst ISO_RE = /^(\\d{4})-(\\d{2})-(\\d{2})$/;\nconst UK_RE = /^(\\d{1,2})[\\/\\-.](\\d{1,2})[\\/\\-.](\\d{4})$/;\nconst MS_PER_DAY = 86400000;\n\n/** Build a UTC timestamp from y/m/d, or null if the calendar date is not real. */\nfunction utcFromParts(y, m, d) {\n  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return null;\n  if (m < 1 || m > 12 || d < 1 || d > 31) return null;\n  const ts = Date.UTC(y, m - 1, d);\n  const dt = new Date(ts);\n  // Rejects 31 February style overflow, which JS would otherwise roll forward.\n  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;\n  return ts;\n}\n\n/** Format a UTC timestamp as 'YYYY-MM-DD'. */\nfunction toISO(ts) {\n  const d = new Date(ts);\n  const p = (n) => String(n).padStart(2, '0');\n  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;\n}\n\n/**\n * Parse a value that came out of a spreadsheet cell into 'YYYY-MM-DD'.\n * Accepts ISO strings, UK dd/mm/yyyy, JS Dates and Google Sheets serial numbers.\n * Returns null rather than guessing when the value is ambiguous or invalid.\n * Never uses `new Date(string)`, whose parsing of '05/09/2026' is locale-dependent.\n */\nfunction parseSheetDate(value) {\n  if (value === null || value === undefined) return null;\n\n  if (value instanceof Date) {\n    if (Number.isNaN(value.getTime())) return null;\n    return toISO(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));\n  }\n\n  // Google Sheets serial: days since 1899-12-30.\n  if (typeof value === 'number') {\n    if (!Number.isFinite(value) || value < 1 || value > 100000) return null;\n    return toISO(Date.UTC(1899, 11, 30) + Math.floor(value) * MS_PER_DAY);\n  }\n\n  const s = String(value).trim();\n  if (s === '') return null;\n\n  const iso = ISO_RE.exec(s);\n  if (iso) {\n    const ts = utcFromParts(+iso[1], +iso[2], +iso[3]);\n    return ts === null ? null : toISO(ts);\n  }\n\n  const uk = UK_RE.exec(s);\n  if (uk) {\n    const ts = utcFromParts(+uk[3], +uk[2], +uk[1]);\n    return ts === null ? null : toISO(ts);\n  }\n\n  return null;\n}\n\n/** Timestamp for an ISO date string, or null. */\nfunction tsOf(isoDate) {\n  const m = ISO_RE.exec(String(isoDate ?? '').trim());\n  if (!m) return null;\n  return utcFromParts(+m[1], +m[2], +m[3]);\n}\n\n/** Whole days from `from` to `to`. Positive when `to` is later. */\nfunction daysBetween(fromISO, toISOdate) {\n  const a = tsOf(fromISO);\n  const b = tsOf(toISOdate);\n  if (a === null || b === null) return null;\n  return Math.round((b - a) / MS_PER_DAY);\n}\n\nfunction addDays(isoDate, n) {\n  const ts = tsOf(isoDate);\n  if (ts === null) return null;\n  return toISO(ts + n * MS_PER_DAY);\n}\n\n/** 0 = Sunday .. 6 = Saturday */\nfunction dayOfWeek(isoDate) {\n  const ts = tsOf(isoDate);\n  return ts === null ? null : new Date(ts).getUTCDay();\n}\n\nfunction isWeekend(isoDate) {\n  const d = dayOfWeek(isoDate);\n  return d === 0 || d === 6;\n}\n\nfunction isBankHoliday(isoDate, holidays) {\n  return Array.isArray(holidays) && holidays.includes(isoDate);\n}\n\n/** Is this date inside a configured quiet period such as the Christmas shutdown? */\nfunction inQuietPeriod(isoDate, quietPeriods) {\n  if (!Array.isArray(quietPeriods)) return false;\n  const m = ISO_RE.exec(String(isoDate));\n  if (!m) return false;\n  const md = `${m[2]}-${m[3]}`;\n  return quietPeriods.some((p) => {\n    // A period may wrap the year end, e.g. 12-24 to 01-02.\n    if (p.from <= p.to) return md >= p.from && md <= p.to;\n    return md >= p.from || md <= p.to;\n  });\n}\n\n/**\n * A day on which client email may be sent.\n * Returns { sendable: boolean, reason: string|null }.\n */\nfunction sendableDay(isoDate, config) {\n  if (tsOf(isoDate) === null) return { sendable: false, reason: 'invalid run date' };\n  if (config.sendOnWeekends !== true && isWeekend(isoDate)) {\n    return { sendable: false, reason: 'weekend' };\n  }\n  if (config.sendOnBankHolidays !== true && isBankHoliday(isoDate, config.bankHolidays)) {\n    return { sendable: false, reason: 'bank holiday' };\n  }\n  if (inQuietPeriod(isoDate, config.quietPeriods)) {\n    return { sendable: false, reason: 'quiet period' };\n  }\n  return { sendable: true, reason: null };\n}\n\n/** 'Wednesday 14 October 2026' — how a UK client reads a date. */\nfunction formatUKDate(isoDate) {\n  const ts = tsOf(isoDate);\n  if (ts === null) return String(isoDate ?? '');\n  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];\n  const months = ['January', 'February', 'March', 'April', 'May', 'June',\n    'July', 'August', 'September', 'October', 'November', 'December'];\n  const d = new Date(ts);\n  return `${days[d.getUTCDay()]} ${d.getUTCDate()} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}`;\n}\n\n// ---- money.js ----\n// Money is handled as integer pence throughout. Floating point never touches a total.\n\n/**\n * Parse a spreadsheet amount into integer pence.\n * Accepts numbers, and strings with currency symbols, thousands separators and spaces.\n * Returns null when the value is not a usable amount.\n */\nfunction parseGBP(value) {\n  if (value === null || value === undefined) return null;\n\n  if (typeof value === 'number') {\n    if (!Number.isFinite(value)) return null;\n    return Math.round(value * 100);\n  }\n\n  let s = String(value).trim();\n  if (s === '') return null;\n\n  let negative = false;\n  // Accounting notation: (1,250.00) means negative.\n  if (/^\\(.*\\)$/.test(s)) { negative = true; s = s.slice(1, -1); }\n\n  s = s.replace(/[£\\s,]/g, '');\n  if (s.startsWith('-')) { negative = true; s = s.slice(1); }\n\n  if (!/^\\d+(\\.\\d{1,2})?$/.test(s)) return null;\n\n  const pence = Math.round(Number(s) * 100);\n  if (!Number.isFinite(pence)) return null;\n  return negative ? -pence : pence;\n}\n\n/** '£1,250.00' */\nfunction formatGBP(pence) {\n  const neg = pence < 0;\n  const abs = Math.abs(Math.round(pence));\n  const pounds = Math.floor(abs / 100);\n  const rem = String(abs % 100).padStart(2, '0');\n  const withSeparators = String(pounds).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');\n  return `${neg ? '-' : ''}£${withSeparators}.${rem}`;\n}\n\n// ---- rules.js ----\n// Business rules with real-world consequences. Every constant here is cited in\n// ../../rules/RULES.md. Change a value there and in this file together, and\n// re-run the tests, which assert the cited values.\n\nconst STAGES = ['friendly', 'firm', 'final'];\n\n/** Rank of a chase stage. Unsent is 0, friendly 1, firm 2, final 3. */\nfunction stageRank(stage) {\n  if (!stage) return 0;\n  const i = STAGES.indexOf(String(stage).trim().toLowerCase());\n  return i === -1 ? 0 : i + 1;\n}\n\n/** Canonical stage name from a sheet cell, or null if it is not a known stage. */\nfunction normaliseStage(value) {\n  if (value === null || value === undefined) return null;\n  const s = String(value).trim().toLowerCase();\n  return STAGES.includes(s) ? s : null;\n}\n\n/**\n * The stage an invoice has reached, given how many days of chasing it has earned.\n * Returns null below the first threshold.\n */\nfunction stageFor(effectiveDays, thresholds) {\n  if (!Number.isFinite(effectiveDays)) return null;\n  if (effectiveDays >= thresholds.final) return 'final';\n  if (effectiveDays >= thresholds.firm) return 'firm';\n  if (effectiveDays >= thresholds.friendly) return 'friendly';\n  return null;\n}\n\n/**\n * Days of chasing an invoice has earned.\n *\n * An invoice already long overdue when it first entered the system has not been\n * chased by us, so it must walk the ladder from the first rung rather than\n * arriving at a final notice that claims a history of reminders that never happened.\n * Capping the effective age at (days since activation + the first threshold) makes\n * an activation-day invoice start at `friendly` and reach each later stage at the\n * normal pace, while an invoice tracked from issue is governed by its real age.\n */\nfunction effectiveDays(daysOverdue, daysSinceActivation, thresholds) {\n  if (!Number.isFinite(daysOverdue)) return null;\n  if (!Number.isFinite(daysSinceActivation)) return daysOverdue;\n  const capped = daysSinceActivation + thresholds.friendly;\n  return Math.min(daysOverdue, capped);\n}\n\n/**\n * Fixed sum recoverable under the Late Payment of Commercial Debts (Interest)\n * Act 1998 s5A. Business-to-business debts only. Amount in integer pence.\n * Bands: under £1,000 => £40; £1,000 to £9,999.99 => £70; £10,000 and over => £100.\n */\nfunction lpcdaCompensationPence(amountPence) {\n  if (!Number.isFinite(amountPence) || amountPence <= 0) return 0;\n  if (amountPence < 100000) return 4000;\n  if (amountPence < 1000000) return 7000;\n  return 10000;\n}\n\n/** The Act applies to business-to-business contracts only. */\nfunction lpcdaApplies(clientType) {\n  return String(clientType ?? '').trim().toLowerCase() === 'business';\n}\n\nconst CLIENT_TYPES = ['business', 'individual'];\n\nfunction normaliseClientType(value) {\n  const s = String(value ?? '').trim().toLowerCase();\n  if (s === 'business' || s === 'b2b' || s === 'company') return 'business';\n  if (s === 'individual' || s === 'consumer' || s === 'person') return 'individual';\n  return null;\n}\n\n// Status values. Only `unpaid` is ever chased; the rest each stop chasing for\n// a different reason and are reported separately so nothing disappears silently.\nconst CHASEABLE_STATUS = 'unpaid';\nconst KNOWN_STATUSES = ['unpaid', 'paid', 'disputed', 'payment plan', 'written off'];\n\nfunction normaliseStatus(value) {\n  const s = String(value ?? '').trim().toLowerCase().replace(/\\s+/g, ' ');\n  if (s === '') return null;\n  if (s === 'outstanding' || s === 'open') return 'unpaid';\n  if (s === 'settled') return 'paid';\n  return KNOWN_STATUSES.includes(s) ? s : null;\n}\n\n// Deliberately conservative: enough to catch the blank and obviously broken\n// addresses that stop a send, without rejecting unusual but valid ones.\nconst EMAIL_RE = /^[^\\s@]+@[^\\s@.]+(\\.[^\\s@.]+)+$/;\n\nfunction isValidEmail(value) {\n  const s = String(value ?? '').trim();\n  return s.length > 0 && s.length <= 254 && EMAIL_RE.test(s);\n}\n\n// ---- copy.js ----\n/**\n * Build the client-facing email for one group of overdue invoices.\n *\n * Rules this copy obeys, each of which exists because getting it wrong has a\n * real cost to the practice:\n *  - The Late Payment of Commercial Debts (Interest) Act 1998 covers\n *    business-to-business debts only, so that paragraph never reaches an individual.\n *  - A final notice only refers to earlier reminders when earlier reminders were\n *    actually sent by this system. It never invents a history.\n *  - Every email says how to reach a person, and carries the fraud warning that\n *    makes a spoofed payment-details email easier for a client to spot.\n *  - One ask, stated plainly, with the amount and the date in the first lines.\n */\nfunction buildEmail({ clientName, clientType, invoices, stage, hasPriorChase, config }) {\n  const totalPence = invoices.reduce((sum, i) => sum + i.amountPence, 0);\n  const multiple = invoices.length > 1;\n  const oldest = invoices.reduce((a, b) => (a.daysOverdue >= b.daysOverdue ? a : b));\n\n  const lines = invoices.map(\n    (i) => `  ${i.invoiceNumber} — ${formatGBP(i.amountPence)} — due ${formatUKDate(i.dueDate)} (${i.daysOverdue} day${i.daysOverdue === 1 ? '' : 's'} overdue)`,\n  );\n  const schedule = lines.join('\\n');\n  const total = formatGBP(totalPence);\n  const greeting = `Dear ${clientName},`;\n\n  let subject;\n  let opening;\n  let ask;\n\n  if (stage === 'friendly') {\n    subject = multiple\n      ? `Reminder: ${invoices.length} invoices now overdue — ${total}`\n      : `Reminder: invoice ${oldest.invoiceNumber} is now overdue — ${total}`;\n    opening = multiple\n      ? `Our records show the following invoices are now past their due date:`\n      : `Our records show that this invoice is now past its due date:`;\n    ask = `If payment is already on its way, thank you and please ignore this message. Otherwise, please arrange payment when you can.`;\n  } else if (stage === 'firm') {\n    subject = multiple\n      ? `Action needed: ${invoices.length} overdue invoices — ${total}`\n      : `Action needed: invoice ${oldest.invoiceNumber} — ${total} overdue`;\n    opening = `The following ${multiple ? 'invoices remain' : 'invoice remains'} unpaid:`;\n    ask = `Please arrange payment within the next 7 days, or contact us if there is a reason for the delay or you would like to discuss a payment plan.`;\n  } else {\n    subject = multiple\n      ? `Final notice: ${invoices.length} overdue invoices — ${total}`\n      : `Final notice: invoice ${oldest.invoiceNumber} — ${total} overdue`;\n    opening = hasPriorChase\n      ? `Despite our earlier reminders, the following ${multiple ? 'invoices remain' : 'invoice remains'} unpaid:`\n      : `The following ${multiple ? 'invoices are' : 'invoice is'} significantly overdue:`;\n    ask = `Please settle the full amount within 7 days of this notice. If you are unable to, please contact us straight away so we can agree a way forward.`;\n  }\n\n  const parts = [greeting, '', opening, '', schedule, '', `Total outstanding: ${total}`, '', ask];\n\n  if (config.mentionLpcda && lpcdaApplies(clientType) && (stage === 'firm' || stage === 'final')) {\n    const comp = formatGBP(lpcdaCompensationPence(oldest.amountPence));\n    parts.push(\n      '',\n      `As these are business debts, we are entitled under the Late Payment of Commercial Debts (Interest) Act 1998 to claim statutory interest and a fixed sum of ${comp} per invoice. We would much rather resolve this without doing so.`,\n    );\n  }\n\n  if (config.paymentInstructions) {\n    parts.push('', 'How to pay:', config.paymentInstructions);\n  }\n\n  parts.push('', 'Kind regards,', config.signOffName || config.senderName, config.firmName);\n  parts.push('', '—', footer(config));\n\n  return { subject, body: parts.join('\\n') };\n}\n\nfunction footer(config) {\n  const contact = config.firmPhone\n    ? `If anything here looks wrong, please call us on ${config.firmPhone} before replying.`\n    : `If anything here looks wrong, please contact us before replying.`;\n  return [\n    `${config.firmName}`,\n    contact,\n    `We will never ask you to change the bank details you pay us into by email. If you receive such a request, telephone us on a number you already hold before acting on it.`,\n  ].join('\\n');\n}\n\n/** The internal pre-send digest: what will go out, and how to stop it. */\nfunction buildDigest({ actions, skipped, runDate, config, holdUrl }) {\n  const count = actions.length;\n  const totalPence = actions.reduce(\n    (s, a) => s + a.invoices.reduce((t, i) => t + i.amountPence, 0), 0,\n  );\n\n  const lines = actions.map((a) => {\n    const amount = formatGBP(a.invoices.reduce((t, i) => t + i.amountPence, 0));\n    const refs = a.invoices.map((i) => i.invoiceNumber).join(', ');\n    return `  ${a.stage.toUpperCase().padEnd(8)} ${a.clientName} — ${amount} (${refs}) → ${a.realRecipient}`;\n  });\n\n  const body = [\n    `Chase run for ${formatUKDate(runDate)}.`,\n    '',\n    count === 0\n      ? 'Nothing is due to be chased today. No emails will be sent.'\n      : `${count} email${count === 1 ? '' : 's'} will be sent at 09:00, covering ${formatGBP(totalPence)}:`,\n    count === 0 ? '' : '',\n    ...lines,\n    '',\n    config.dryRun\n      ? `DRY RUN IS ON. Nothing will reach a client. Every email above will be delivered to ${config.dryRunRecipient} instead.`\n      : `These will go to the real recipients above.`,\n  ];\n\n  if (count > 0 && holdUrl) {\n    body.push('', `To stop today's run, open this link before 09:00:`, holdUrl);\n  }\n\n  if (skipped.length) {\n    const grouped = {};\n    for (const s of skipped) grouped[s.reason] = (grouped[s.reason] || 0) + 1;\n    body.push('', 'Not chased today:');\n    for (const [reason, n] of Object.entries(grouped).sort()) {\n      body.push(`  ${n} × ${reason}`);\n    }\n  }\n\n  const needsAttention = skipped.filter((s) => s.needsAttention);\n  if (needsAttention.length) {\n    body.push('', 'Rows that need your attention in the sheet:');\n    for (const s of needsAttention) {\n      body.push(`  row ${s.rowNumber}: ${s.invoiceNumber || '(no invoice number)'} — ${s.reason}`);\n    }\n  }\n\n  return {\n    subject: `Chase preview: ${count} email${count === 1 ? '' : 's'} at 09:00${config.dryRun ? ' (dry run)' : ''}`,\n    body: body.join('\\n'),\n  };\n}\n\n// ---- config.js ----\n/**\n * Defaults for the chasing engine. Everything a practice would reasonably want\n * to change lives here, is passed in from the workflow's Config node, and is\n * covered by tests. Nothing behavioural is read from the environment directly.\n */\nconst DEFAULT_CONFIG = {\n  // Days overdue at which each stage becomes due.\n  thresholds: { friendly: 7, firm: 30, final: 60 },\n\n  // Never send two chase emails to the same client closer together than this.\n  minDaysBetweenChases: 7,\n\n  // Hard ceilings. A breach halts the run rather than sending, because the\n  // usual cause is a bad edit to the sheet rather than a genuine surge.\n  maxEmailsPerRun: 50,\n\n  // Sending calendar.\n  sendOnWeekends: false,\n  sendOnBankHolidays: false,\n  quietPeriods: [{ from: '12-24', to: '01-01' }],\n  bankHolidays: [\n  \"2026-01-01\", \"2026-04-03\", \"2026-04-06\", \"2026-05-04\",\n  \"2026-05-25\", \"2026-08-31\", \"2026-12-25\", \"2026-12-28\",\n  \"2027-01-01\", \"2027-03-26\", \"2027-03-29\", \"2027-05-03\",\n  \"2027-05-31\", \"2027-08-30\", \"2027-12-27\", \"2027-12-28\",\n  \"2028-01-03\", \"2028-04-14\", \"2028-04-17\", \"2028-05-01\",\n  \"2028-05-29\", \"2028-08-28\", \"2028-12-25\", \"2028-12-26\"\n],\n\n  // Identity and copy.\n  firmName: 'Your Firm',\n  senderName: 'Accounts',\n  senderEmail: 'accounts@example.co.uk',\n  replyToEmail: 'accounts@example.co.uk',\n  firmPhone: '',\n  signOffName: '',\n  paymentInstructions: '',\n\n  // State the statutory entitlement in firm and final emails to business clients.\n  mentionLpcda: true,\n\n  // Safety. While true, every client email is redirected to dryRunRecipient.\n  dryRun: true,\n  dryRunRecipient: '',\n};\n\nfunction withDefaults(config = {}) {\n  return {\n    ...DEFAULT_CONFIG,\n    ...config,\n    thresholds: { ...DEFAULT_CONFIG.thresholds, ...(config.thresholds || {}) },\n  };\n}\n\n// ---- plan.js ----\n/**\n * Decide everything this kit will do on a given day.\n *\n * This is the whole of the decision-making. It is a pure function: the same\n * rows and the same date always produce the same result, it performs no input\n * or output, and it never throws on bad data. The n8n workflow around it only\n * reads rows, delivers what this returns, and writes back what this says to write.\n *\n * @returns {{actions: Array, skipped: Array, writeBacks: Array, summary: Object}}\n */\nfunction plan({ rows, today, config: rawConfig, sentKeys = [] }) {\n  const alreadySent = new Set(\n    (Array.isArray(sentKeys) ? sentKeys : []).map((k) => String(k).trim()).filter(Boolean),\n  );\n  const config = withDefaults(rawConfig);\n  const skipped = [];\n  const summary = {\n    runDate: today,\n    rowsRead: Array.isArray(rows) ? rows.length : 0,\n    valid: 0,\n    overdue: 0,\n    due: 0,\n    grouped: 0,\n    emails: 0,\n    skipped: 0,\n    halted: false,\n    haltReason: null,\n    sendableDay: true,\n    notSendableReason: null,\n    dryRun: config.dryRun === true,\n  };\n\n  const day = sendableDay(today, config);\n  if (!day.sendable) {\n    summary.sendableDay = false;\n    summary.notSendableReason = day.reason;\n    summary.skipped = summary.rowsRead;\n    return {\n      actions: [],\n      writeBacks: [],\n      skipped: (rows || []).map((r, i) => ({\n        rowNumber: rowNumberOf(r, i),\n        invoiceNumber: String(r?.['Invoice Number'] ?? '').trim(),\n        reason: `not a sending day: ${day.reason}`,\n        needsAttention: false,\n      })),\n      summary,\n    };\n  }\n\n  if (config.dryRun === true && !isValidEmail(config.dryRunRecipient)) {\n    summary.halted = true;\n    summary.haltReason = 'dry run is on but no valid dryRunRecipient is configured';\n    return { actions: [], writeBacks: [], skipped: [], summary };\n  }\n\n  // 1. Validate and classify every row. Nothing is ever dropped silently.\n  const candidates = [];\n  for (const [i, raw] of (rows || []).entries()) {\n    const row = raw && typeof raw === 'object' ? raw : {};\n    const rowNumber = rowNumberOf(row, i);\n    const invoiceNumber = String(row['Invoice Number'] ?? '').trim();\n    const add = (reason, needsAttention) =>\n      skipped.push({ rowNumber, invoiceNumber, reason, needsAttention });\n\n    if (invoiceNumber === '') { add('no invoice number', true); continue; }\n\n    const status = normaliseStatus(row['Status']);\n    if (status === null) {\n      add(`unrecognised status \"${String(row['Status'] ?? '').trim()}\"`, true);\n      continue;\n    }\n\n    const amountPence = parseGBP(row['Amount GBP']);\n    if (amountPence === null) {\n      add(`amount is not a usable number \"${String(row['Amount GBP'] ?? '').trim()}\"`, true);\n      continue;\n    }\n\n    const dueDate = parseSheetDate(row['Due Date']);\n    if (dueDate === null) {\n      add(`due date is not a usable date \"${String(row['Due Date'] ?? '').trim()}\"`, true);\n      continue;\n    }\n\n    const clientType = normaliseClientType(row['Client Type']);\n    if (clientType === null) {\n      add(`client type must be Business or Individual, found \"${String(row['Client Type'] ?? '').trim()}\"`, true);\n      continue;\n    }\n\n    summary.valid += 1;\n\n    if (status !== CHASEABLE_STATUS) { add(`status is ${status}`, false); continue; }\n    if (amountPence <= 0) { add('amount is zero or negative', true); continue; }\n\n    const email = String(row['Client Email'] ?? '').trim();\n    if (!isValidEmail(email)) {\n      add(`client email is missing or invalid \"${email}\"`, true);\n      continue;\n    }\n\n    const daysOverdue = daysBetween(dueDate, today);\n    if (daysOverdue === null || daysOverdue <= 0) { add('not yet overdue', false); continue; }\n    summary.overdue += 1;\n\n    // An invoice with no activation date is treated as having entered the system\n    // today, which is the cautious reading: it starts at the first rung.\n    const activationDate = parseSheetDate(row['Activation Date']) ?? today;\n    const daysSinceActivation = Math.max(0, daysBetween(activationDate, today) ?? 0);\n\n    const earned = effectiveDays(daysOverdue, daysSinceActivation, config.thresholds);\n    const stage = stageFor(earned, config.thresholds);\n    if (stage === null) { add(`overdue ${daysOverdue} day(s), below the first chase threshold`, false); continue; }\n\n    const lastStage = normaliseStage(row['Last Chase Stage']);\n    if (stageRank(stage) <= stageRank(lastStage)) {\n      add(`${stage} already sent`, false);\n      continue;\n    }\n\n    const lastChasedOn = parseSheetDate(row['Last Chased On']);\n    if (lastChasedOn) {\n      const since = daysBetween(lastChasedOn, today);\n      if (since !== null && since < config.minDaysBetweenChases) {\n        add(`chased ${since} day(s) ago, minimum gap is ${config.minDaysBetweenChases}`, false);\n        continue;\n      }\n    }\n\n    // Belt and braces over the sheet's own Last Chase Stage: an append-only\n    // ledger of keys already sent. The sheet write can fail; this is what makes\n    // a crash between sending and writing back unable to produce a second copy.\n    const key = `${invoiceNumber}|${stage}`;\n    if (alreadySent.has(key)) { add(`${stage} already recorded as sent`, false); continue; }\n\n    summary.due += 1;\n    candidates.push({\n      rowNumber, invoiceNumber, email, clientType, amountPence, dueDate,\n      daysOverdue, stage, hasPriorChase: stageRank(lastStage) > 0,\n      clientName: String(row['Client'] ?? '').trim() || invoiceNumber,\n    });\n  }\n\n  // 2. One email per client contact, however many invoices they owe on.\n  const groups = new Map();\n  for (const c of candidates) {\n    const key = c.email.toLowerCase();\n    if (!groups.has(key)) groups.set(key, []);\n    groups.get(key).push(c);\n  }\n  summary.grouped = groups.size;\n\n  // 3. Build the emails, in a stable order so runs are reproducible.\n  const actions = [];\n  for (const [key, invoices] of [...groups.entries()].sort(([a], [b]) => (a < b ? -1 : 1))) {\n    invoices.sort((a, b) => b.daysOverdue - a.daysOverdue || (a.invoiceNumber < b.invoiceNumber ? -1 : 1));\n    const stage = invoices.reduce(\n      (best, i) => (stageRank(i.stage) > stageRank(best) ? i.stage : best), null,\n    );\n    const hasPriorChase = invoices.some((i) => i.hasPriorChase);\n    const first = invoices[0];\n    const { subject, body } = buildEmail({\n      clientName: first.clientName,\n      clientType: first.clientType,\n      invoices, stage, hasPriorChase, config,\n    });\n\n    const realRecipient = first.email;\n    actions.push({\n      clientName: first.clientName,\n      clientType: first.clientType,\n      realRecipient,\n      to: config.dryRun ? config.dryRunRecipient : realRecipient,\n      subject: config.dryRun ? `[DRY RUN → ${realRecipient}] ${subject}` : subject,\n      body,\n      stage,\n      invoices,\n      // One email per invoice per stage, for all time. The send step records\n      // this key and refuses a key it has already recorded, so a crash between\n      // sending and writing back can never produce a second copy.\n      idempotencyKeys: invoices.map((i) => `${i.invoiceNumber}|${i.stage}`),\n      groupKey: key,\n    });\n  }\n\n  // 4. Hard ceiling. A breach is nearly always a bad sheet edit, so halt rather\n  //    than send a partial batch that is hard to reason about afterwards.\n  if (actions.length > config.maxEmailsPerRun) {\n    summary.halted = true;\n    summary.haltReason =\n      `${actions.length} emails would be sent, which is above the limit of ${config.maxEmailsPerRun}. Nothing has been sent. Check the sheet, then raise the limit if the run is genuinely correct.`;\n    summary.emails = 0;\n    summary.skipped = skipped.length;\n    return { actions: [], writeBacks: [], skipped, summary };\n  }\n\n  const writeBacks = actions.flatMap((a) =>\n    a.invoices.map((i) => ({\n      rowNumber: i.rowNumber,\n      invoiceNumber: i.invoiceNumber,\n      lastChaseStage: i.stage,\n      lastChasedOn: today,\n      idempotencyKey: `${i.invoiceNumber}|${i.stage}`,\n    })),\n  );\n\n  summary.emails = actions.length;\n  summary.skipped = skipped.length;\n  return { actions, writeBacks, skipped, summary };\n}\n\nfunction rowNumberOf(row, index) {\n  const n = row && row.row_number;\n  return Number.isFinite(n) ? n : index + 2; // +2: header row, then 1-based\n}\n\n// Re-planning here keeps the send path and the preview path in exact agreement:\n// both are produced by the same function from the same inputs.\nconst cfgItem = $('Build Config').first().json;\nconst rows = $('Read Invoices').all().map((i) => i.json);\nlet sentKeys = [];\ntry {\n  sentKeys = $('Read Sent Log').all()\n    .map((i) => String(i.json['Idempotency Key'] ?? '').trim())\n    .filter(Boolean);\n} catch (e) { sentKeys = []; }\n\nconst result = plan({ rows, today: cfgItem.today, config: cfgItem.config, sentKeys });\n\nreturn result.actions.map((a, index) => ({\n  json: {\n    to: a.to,\n    realRecipient: a.realRecipient,\n    subject: a.subject,\n    body: a.body,\n    stage: a.stage,\n    clientName: a.clientName,\n    idempotencyKey: a.idempotencyKeys[0],\n    writeBacks: a.invoices.map((i) => ({\n      rowNumber: i.rowNumber,\n      invoiceNumber: i.invoiceNumber,\n      stage: i.stage,\n      key: `${i.invoiceNumber}|${i.stage}`,\n    })),\n    sentOn: cfgItem.today,\n  },\n  pairedItem: { item: index },\n}));"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "loop",
+      "name": "One Client At A Time",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1120,
+        -20
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "send-chase",
+      "name": "Send Chase Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1340,
+        100
+      ],
+      "parameters": {
+        "fromEmail": "={{ $('Build Config').first().json.config.senderEmail }}",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "text": "={{ $json.body }}",
+        "options": {
+          "appendAttribution": false,
+          "replyTo": "={{ $('Build Config').first().json.config.replyToEmail }}"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "rows-to-write",
+      "name": "Rows To Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// GENERATED FILE. Do not edit this node in the n8n editor.\n// Source: kits/uk-accountancy/04-invoice-payment-chasing/src/core/\n// Rebuild with `npm run build`. CI fails if this drifts from the source.\n\n// One row per invoice in the email that was just sent. Emitted after the send\n// so that a send failure leaves the sheet untouched and the invoice is retried.\n// The loop runs one client per iteration, so the loop node's output is this\n// client's action. Deliberately not $('Prepare Actions').item: that needs\n// paired-item information to survive the email node, which replaces its output\n// with the SMTP result, and resolving it is not guaranteed.\nconst action = $('One Client At A Time').first().json;\nreturn action.writeBacks.map((w, index) => ({\n  json: {\n    rowNumber: w.rowNumber,\n    'Invoice Number': w.invoiceNumber,\n    'Last Chase Stage': w.stage,\n    'Last Chased On': action.sentOn,\n    'Idempotency Key': w.key,\n    'Sent To': action.realRecipient,\n    'Sent At': new Date().toISOString(),\n  },\n  pairedItem: { item: index },\n}));"
+      }
+    },
+    {
+      "id": "append-sent",
+      "name": "Append To Sent Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1780,
+        100
+      ],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.INVOICE_TRACKER_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sent Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Idempotency Key": "={{ $json[\"Idempotency Key\"] }}",
+            "Invoice Number": "={{ $json[\"Invoice Number\"] }}",
+            "Stage": "={{ $json[\"Last Chase Stage\"] }}",
+            "Sent To": "={{ $json[\"Sent To\"] }}",
+            "Sent At": "={{ $json[\"Sent At\"] }}"
+          }
+        },
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "carry-rows",
+      "name": "Carry Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1890,
+        100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// GENERATED FILE. Do not edit this node in the n8n editor.\n// Source: kits/uk-accountancy/04-invoice-payment-chasing/src/core/\n// Rebuild with `npm run build`. CI fails if this drifts from the source.\n\n// The Sheets append above outputs the rows it appended, not the rows it\n// was given. Re-reading them here keeps the update that follows working\n// from the real data rather than from whatever the API echoed back.\nreturn $('Rows To Record').all().map((item, index) => ({\n  json: item.json,\n  pairedItem: { item: index },\n}));"
+      }
+    },
+    {
+      "id": "write-back",
+      "name": "Mark Invoice Chased",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2110,
+        100
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.INVOICE_TRACKER_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Invoices"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "row_number"
+          ],
+          "value": {
+            "row_number": "={{ $json.rowNumber }}",
+            "Last Chase Stage": "={{ $json[\"Last Chase Stage\"] }}",
+            "Last Chased On": "={{ $json[\"Last Chased On\"] }}"
+          }
+        },
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "log-run",
+      "name": "Append Run Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1340,
+        -240
+      ],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.INVOICE_TRACKER_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Run Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Run At": "={{ $now.toISO() }}",
+            "Run Date": "={{ $('Plan Run').first().json.today }}",
+            "Mode": "={{ $('Plan Run').first().json.mode }}",
+            "Rows Read": "={{ $('Plan Run').first().json.summary.rowsRead }}",
+            "Overdue": "={{ $('Plan Run').first().json.summary.overdue }}",
+            "Emails Planned": "={{ $('Plan Run').first().json.summary.emails }}",
+            "Skipped": "={{ $('Plan Run').first().json.summary.skipped }}",
+            "Dry Run": "={{ $('Plan Run').first().json.summary.dryRun }}",
+            "Note": "={{ $('Plan Run').first().json.summary.haltReason || $('Plan Run').first().json.summary.notSendableReason || \"ok\" }}"
+          }
+        },
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "hold-webhook",
+      "name": "Hold Today Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -460,
+        420
+      ],
+      "webhookId": "k04-hold-today",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "kit04-hold-today",
+        "responseMode": "lastNode",
+        "authentication": "headerAuth",
+        "options": {}
+      }
+    },
+    {
+      "id": "hold-write",
+      "name": "Record Hold",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -200,
+        420
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.INVOICE_TRACKER_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Run Control"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "row_number"
+          ],
+          "value": {
+            "row_number": "2",
+            "Hold Until": "={{ $now.setZone('Europe/London').toISODate() }}",
+            "Set By": "={{ $json.query.by || \"preview link\" }}",
+            "Set At": "={{ $now.toISO() }}"
+          }
+        },
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "hold-reply",
+      "name": "Confirm Hold",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        40,
+        420
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "msg",
+              "name": "message",
+              "type": "string",
+              "value": "=Today's chase run is on hold. No invoice emails will be sent today. Clear the Hold Until cell in the Run Control tab to undo this."
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "sticky-1",
+      "name": "How this works",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -500,
+        -420
+      ],
+      "parameters": {
+        "width": 900,
+        "height": 220,
+        "content": "## Invoice chasing\\n\\n**08:30** sends you a preview of what will go out. **09:00** sends it.\\n\\nEvery decision is made by the `Plan Run` node, which is generated from\\nthe tested source in `src/core/`. Do not edit it here: run `npm run build`\\nand re-import, or the nightly drift check will flag this workflow.\\n\\n**DRY_RUN is on by default.** Nothing reaches a client until you set it to `false`."
+      }
+    }
+  ],
+  "connections": {
+    "Preview Schedule 08:30": {
+      "main": [
+        [
+          {
+            "node": "Mode Preview",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mode Preview": {
+      "main": [
+        [
+          {
+            "node": "Build Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Schedule 09:00": {
+      "main": [
+        [
+          {
+            "node": "Mode Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mode Send": {
+      "main": [
+        [
+          {
+            "node": "Build Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Config": {
+      "main": [
+        [
+          {
+            "node": "Read Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Invoices": {
+      "main": [
+        [
+          {
+            "node": "Read Sent Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Sent Log": {
+      "main": [
+        [
+          {
+            "node": "Read Run Control",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Run Control": {
+      "main": [
+        [
+          {
+            "node": "Plan Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan Run": {
+      "main": [
+        [
+          {
+            "node": "Preview or Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preview or Send": {
+      "main": [
+        [
+          {
+            "node": "Email Preview To Practice",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Actions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Append Run Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Preview To Practice": {
+      "main": [
+        [
+          {
+            "node": "Append Run Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Actions": {
+      "main": [
+        [
+          {
+            "node": "One Client At A Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One Client At A Time": {
+      "main": [
+        [
+          {
+            "node": "Append Run Log",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Chase Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Chase Email": {
+      "main": [
+        [
+          {
+            "node": "Rows To Record",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "One Client At A Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rows To Record": {
+      "main": [
+        [
+          {
+            "node": "Append To Sent Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append To Sent Log": {
+      "main": [
+        [
+          {
+            "node": "Carry Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Carry Rows": {
+      "main": [
+        [
+          {
+            "node": "Mark Invoice Chased",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Invoice Chased": {
+      "main": [
+        [
+          {
+            "node": "One Client At A Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hold Today Webhook": {
+      "main": [
+        [
+          {
+            "node": "Record Hold",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Hold": {
+      "main": [
+        [
+          {
+            "node": "Confirm Hold",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/London",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "executionTimeout": 900
+  },
+  "tags": [
+    "uk-accountancy",
+    "credit-control"
+  ],
+  "meta": {
+    "generatedBy": "scripts/build-workflow.js",
+    "builtFrom": "src/core"
+  }
+}

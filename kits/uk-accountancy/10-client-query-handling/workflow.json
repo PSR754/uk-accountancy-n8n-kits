@@ -1,0 +1,291 @@
+{
+  "name": "Client Query Handling & SLA Tracker",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Client Query Form",
+        "formDescription": "Submit a query and we'll get back to you within our SLA.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Client Name",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Query Type",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  { "option": "Tax Question" },
+                  { "option": "Document Request" },
+                  { "option": "Invoice Query" },
+                  { "option": "General" }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Description",
+              "fieldType": "textarea",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Urgency",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  { "option": "Urgent" },
+                  { "option": "Normal" }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Client Email",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d5d5d5d5-0001-4000-8000-000000000001",
+      "name": "Client Query Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compute Query ID, SLA due date (business days), and round-robin assignment\nconst staffList = ($env.STAFF_ROTATION || 'staff1@yourpractice.co.uk,staff2@yourpractice.co.uk').split(',').map(s => s.trim());\n\n// simple round robin based on current minute (stateless approximation);\n// for true round robin persist an index in a sheet/DB instead\nconst idx = new Date().getMinutes() % staffList.length;\nconst assignedTo = staffList[idx];\n\nfunction addBusinessDays(date, days) {\n  const result = new Date(date);\n  let added = 0;\n  while (added < days) {\n    result.setDate(result.getDate() + 1);\n    const day = result.getDay();\n    if (day !== 0 && day !== 6) added++;\n  }\n  return result;\n}\n\nconst input = $input.first().json;\nconst urgency = input['Urgency'];\nconst slaDays = urgency === 'Urgent' ? Number($env.SLA_URGENT_DAYS || 1) : Number($env.SLA_NORMAL_DAYS || 3);\nconst receivedDate = new Date();\nconst dueBy = addBusinessDays(receivedDate, slaDays);\nconst queryId = `Q-${receivedDate.getTime()}`;\n\nreturn [{\n  json: {\n    queryId,\n    client: input['Client Name'],\n    clientEmail: input['Client Email'],\n    queryType: input['Query Type'],\n    description: input['Description'],\n    urgency,\n    receivedDate: receivedDate.toISOString(),\n    assignedTo,\n    status: 'Open',\n    dueBy: dueBy.toISOString()\n  }\n}];"
+      },
+      "id": "d5d5d5d5-0002-4000-8000-000000000002",
+      "name": "Compute SLA & Assign Staff",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [540, 300]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.CLIENT_QUERIES_SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Client Queries",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Query ID": "={{ $json.queryId }}",
+            "Client": "={{ $json.client }}",
+            "Client Email": "={{ $json.clientEmail }}",
+            "Type": "={{ $json.queryType }}",
+            "Description": "={{ $json.description }}",
+            "Urgency": "={{ $json.urgency }}",
+            "Received Date": "={{ $json.receivedDate }}",
+            "Assigned To": "={{ $json.assignedTo }}",
+            "Status": "={{ $json.status }}",
+            "Due By": "={{ $json.dueBy }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "d5d5d5d5-0003-4000-8000-000000000003",
+      "name": "Log Query to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [820, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.PRACTICE_SENDER_EMAIL }}",
+        "toEmail": "={{ $json.clientEmail }}",
+        "subject": "=We've received your query - {{ $json.queryId }}",
+        "emailFormat": "text",
+        "text": "=Dear {{ $json.client }},\n\nThank you for your query. We've logged it as {{ $json.queryId }} and assigned it to a member of our team.\n\nExpected response by: {{ $json.dueBy }}\n\nQuery type: {{ $json.queryType }}\n\nWe'll be in touch shortly.\n\nMany thanks,\nThe Practice Team",
+        "options": {}
+      },
+      "id": "d5d5d5d5-0004-4000-8000-000000000004",
+      "name": "Send Acknowledgement Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 4
+            }
+          ]
+        }
+      },
+      "id": "d5d5d5d5-0005-4000-8000-000000000005",
+      "name": "SLA Check Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 560]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.CLIENT_QUERIES_SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Client Queries",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "d5d5d5d5-0006-4000-8000-000000000006",
+      "name": "Read Client Queries",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [540, 560]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "e5e5e5e5-0001-4000-8000-000000000001",
+              "leftValue": "={{ $json.Status }}",
+              "rightValue": "Closed",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d5d5d5d5-0007-4000-8000-000000000007",
+      "name": "Filter Open Queries",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [820, 560]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check which open queries are approaching or have breached SLA (Due By)\nconst WARNING_HOURS = Number($env.SLA_WARNING_HOURS || 4);\nconst now = new Date();\n\nreturn $input.all()\n  .map(item => {\n    const dueBy = new Date(item.json['Due By']);\n    const hoursRemaining = (dueBy - now) / (1000 * 60 * 60);\n    let slaState = 'ok';\n    if (hoursRemaining < 0) slaState = 'breached';\n    else if (hoursRemaining <= WARNING_HOURS) slaState = 'approaching';\n    return { json: { ...item.json, hoursRemaining, slaState } };\n  })\n  .filter(item => item.json.slaState !== 'ok');"
+      },
+      "id": "d5d5d5d5-0008-4000-8000-000000000008",
+      "name": "Check SLA Breach/Warning",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 560]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.PRACTICE_SENDER_EMAIL }}",
+        "toEmail": "={{ $env.PRACTICE_MANAGER_EMAIL }}",
+        "subject": "=SLA {{ $json.slaState === 'breached' ? 'BREACHED' : 'approaching' }}: {{ $json['Query ID'] }}",
+        "emailFormat": "text",
+        "text": "=Query {{ $json['Query ID'] }} for {{ $json.Client }} is {{ $json.slaState === 'breached' ? 'past its SLA due date' : 'approaching its SLA due date' }}.\n\nAssigned To: {{ $json['Assigned To'] }}\nDue By: {{ $json['Due By'] }}\nDescription: {{ $json.Description }}",
+        "options": {}
+      },
+      "id": "d5d5d5d5-0009-4000-8000-000000000009",
+      "name": "Alert Assigned Staff & Manager",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1380, 560]
+    }
+  ],
+  "connections": {
+    "Client Query Form": {
+      "main": [
+        [
+          {
+            "node": "Compute SLA & Assign Staff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute SLA & Assign Staff": {
+      "main": [
+        [
+          {
+            "node": "Log Query to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Query to Sheet": {
+      "main": [
+        [
+          {
+            "node": "Send Acknowledgement Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SLA Check Schedule": {
+      "main": [
+        [
+          {
+            "node": "Read Client Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Client Queries": {
+      "main": [
+        [
+          {
+            "node": "Filter Open Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Open Queries": {
+      "main": [
+        [
+          {
+            "node": "Check SLA Breach/Warning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check SLA Breach/Warning": {
+      "main": [
+        [
+          {
+            "node": "Alert Assigned Staff & Manager",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "id": "client-query-handling-sla-tracker"
+}

@@ -1,0 +1,6 @@
+Invoice Number,Client,Client Email,Client Type,Amount GBP,Due Date,Status,Last Chase Stage,Last Chased On,Activation Date
+INV-3001,Paid Ltd,ap@paid.co.uk,Business,500.00,2026-06-01,Paid,,,2026-05-01
+INV-3002,Disputed Ltd,ap@disputed.co.uk,Business,500.00,2026-06-01,Disputed,,,2026-05-01
+INV-3003,Plan Ltd,ap@plan.co.uk,Business,500.00,2026-06-01,Payment Plan,,,2026-05-01
+INV-3004,Written Off Ltd,ap@writtenoff.co.uk,Business,500.00,2026-06-01,Written Off,,,2026-05-01
+INV-3005,Unpaid Ltd,ap@unpaid.co.uk,Business,500.00,2026-06-01,Unpaid,,,2026-05-01

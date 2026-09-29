@@ -1,0 +1,197 @@
+{
+  "name": "Client Document Collection Tracker",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 3
+            }
+          ]
+        }
+      },
+      "id": "a1a1a1a1-0001-4000-8000-000000000001",
+      "name": "Chase Schedule (every 3 days)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [280, 300]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.DOCUMENT_CHECKLIST_SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Checklist",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "a1a1a1a1-0002-4000-8000-000000000002",
+      "name": "Read Document Checklist",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [560, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "b1b1b1b1-0001-4000-8000-000000000001",
+              "leftValue": "={{ $json.Received }}",
+              "rightValue": "Y",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1a1a1a1-0003-4000-8000-000000000003",
+      "name": "Filter Outstanding Items",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [840, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Group outstanding document rows by Client\nconst items = $input.all();\nconst groups = {};\nfor (const item of items) {\n  const client = item.json.Client;\n  if (!groups[client]) {\n    groups[client] = {\n      client,\n      email: item.json['Client Email'] || '',\n      jobType: item.json['Job Type'] || '',\n      missingDocs: []\n    };\n  }\n  groups[client].missingDocs.push(item.json['Document Name']);\n}\nreturn Object.values(groups).map(g => ({ json: g }));"
+      },
+      "id": "a1a1a1a1-0004-4000-8000-000000000004",
+      "name": "Group By Client",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.PRACTICE_SENDER_EMAIL }}",
+        "toEmail": "={{ $json.email }}",
+        "subject": "=Documents still needed for your {{ $json.jobType }}",
+        "emailFormat": "text",
+        "text": "=Dear {{ $json.client }},\n\nWe are still waiting on the following documents to progress your {{ $json.jobType }}:\n\n{{ $json.missingDocs.map(d => '- ' + d).join('\\n') }}\n\nPlease reply to this email confirming once sent, or upload via our client portal.\n\nMany thanks,\nThe Practice Team",
+        "options": {}
+      },
+      "id": "a1a1a1a1-0005-4000-8000-000000000005",
+      "name": "Send Consolidated Chase Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1400, 300]
+    },
+    {
+      "parameters": {
+        "path": "document-received",
+        "options": {},
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      },
+      "id": "a1a1a1a1-0006-4000-8000-000000000006",
+      "name": "Webhook: Mark Received",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [280, 560]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.DOCUMENT_CHECKLIST_SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Checklist",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Received": "Y",
+            "Date Received": "={{ $now.toISODate() }}"
+          },
+          "matchingColumns": ["Client", "Document Name"]
+        },
+        "options": {}
+      },
+      "id": "a1a1a1a1-0007-4000-8000-000000000007",
+      "name": "Update Sheet: Mark Received",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [560, 560]
+    }
+  ],
+  "connections": {
+    "Chase Schedule (every 3 days)": {
+      "main": [
+        [
+          {
+            "node": "Read Document Checklist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Document Checklist": {
+      "main": [
+        [
+          {
+            "node": "Filter Outstanding Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Outstanding Items": {
+      "main": [
+        [
+          {
+            "node": "Group By Client",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Group By Client": {
+      "main": [
+        [
+          {
+            "node": "Send Consolidated Chase Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: Mark Received": {
+      "main": [
+        [
+          {
+            "node": "Update Sheet: Mark Received",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "id": "client-document-collection-tracker"
+}

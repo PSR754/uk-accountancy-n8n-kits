@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Fails if workflow.json has drifted from the source the tests verify.
+      # Without this, an edit made in the n8n editor and pasted back could ship
+      # code that nothing has ever tested.
+      - name: Workflow matches its source
+        run: npm run build:check
+
+      # n8n-specific static checks: the node defaults that do not appear in the
+      # exported JSON and that made the original defects invisible.
+      - name: Lint workflows
+        run: npm run lint
+
+      - name: Tests
+        run: |
+          node --test \
+            kits/uk-accountancy/04-invoice-payment-chasing/tests/unit/*.test.js \
+            kits/uk-accountancy/04-invoice-payment-chasing/tests/property/*.test.js \
+            kits/uk-accountancy/04-invoice-payment-chasing/tests/fault/*.test.js
+
+      - name: No secrets in the repo
+        run: |
+          # .env files hold real credentials; only the example belongs here.
+          if git ls-files | grep -E '(^|/)\.env$'; then
+            echo "A .env file is committed. Remove it and rotate anything in it."
+            exit 1
+          fi
+          # A sheet id is not a secret, but an API key pasted into .env.example is.
+          if grep -rInE '(api[_-]?key|secret|password)\s*=\s*[A-Za-z0-9_\-]{16,}' \
+              --include='*.example' --include='*.json' --include='*.md' . ; then
+            echo "Something that looks like a real credential is committed."
+            exit 1
+          fi

@@ -1,0 +1,167 @@
+{
+  "name": "Email Triage & Inbox Management",
+  "nodes": [
+    {
+      "parameters": {
+        "mailbox": "INBOX",
+        "postProcessAction": "read",
+        "options": {}
+      },
+      "id": "c4c4c4c4-0001-4000-8000-000000000001",
+      "name": "New Inbox Email (IMAP)",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2,
+      "position": [260, 340]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract the fields we need for triage from the raw email item\nconst item = $input.first().json;\n\nconst fromAddress = (item.from && item.from.value && item.from.value[0] && item.from.value[0].address) || item.from || '';\nconst subject = item.subject || '';\nconst textBody = item.text || item.textPlain || '';\nconst snippet = textBody.substring(0, 300);\n\nreturn [{\n  json: {\n    fromAddress: String(fromAddress).toLowerCase(),\n    subject,\n    snippet,\n    receivedDate: item.date || new Date().toISOString()\n  }\n}];"
+      },
+      "id": "c4c4c4c4-0002-4000-8000-000000000002",
+      "name": "Extract Sender, Subject, Snippet",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [540, 340]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Rule-based classification\nconst clientDomains = ($env.KNOWN_CLIENT_DOMAINS || '').split(',').map(d => d.trim().toLowerCase()).filter(Boolean);\nconst urgentKeywords = ($env.URGENT_KEYWORDS || 'urgent,deadline,hmrc investigation').split(',').map(k => k.trim().toLowerCase()).filter(Boolean);\n\nconst item = $input.first().json;\nconst subjectLower = item.subject.toLowerCase();\nconst snippetLower = item.snippet.toLowerCase();\nconst senderDomain = (item.fromAddress.split('@')[1] || '');\n\nlet category = 'Uncategorised';\nif (subjectLower.includes('hmrc') || subjectLower.includes('companies house')) {\n  category = 'Statutory';\n} else if (subjectLower.includes('invoice') || subjectLower.includes('payment')) {\n  category = 'Billing';\n} else if (clientDomains.includes(senderDomain)) {\n  category = 'Client Query';\n}\n\nconst isUrgent = urgentKeywords.some(k => subjectLower.includes(k) || snippetLower.includes(k));\n\nreturn [{\n  json: {\n    ...item,\n    category,\n    isUrgent\n  }\n}];"
+      },
+      "id": "c4c4c4c4-0003-4000-8000-000000000003",
+      "name": "Classify Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [820, 340]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.INBOX_LOG_SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Inbox Log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Category": "={{ $json.category }}",
+            "Sender": "={{ $json.fromAddress }}",
+            "Subject": "={{ $json.subject }}",
+            "Received Date": "={{ $json.receivedDate }}",
+            "Status": "Unread",
+            "Urgent": "={{ $json.isUrgent ? 'Y' : 'N' }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "c4c4c4c4-0004-4000-8000-000000000004",
+      "name": "Log to Inbox Log Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1100, 340]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "d4d4d4d4-0001-4000-8000-000000000001",
+              "leftValue": "={{ $json.isUrgent }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c4c4c4c4-0005-4000-8000-000000000005",
+      "name": "Urgent Keyword Detected?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1100, 540]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.PRACTICE_SENDER_EMAIL }}",
+        "toEmail": "={{ $env.PRACTICE_MANAGER_EMAIL }}",
+        "subject": "=URGENT inbox alert: {{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "=An incoming email was flagged as urgent by the triage workflow.\n\nFrom: {{ $json.fromAddress }}\nSubject: {{ $json.subject }}\nCategory: {{ $json.category }}\n\nSnippet:\n{{ $json.snippet }}",
+        "options": {}
+      },
+      "id": "c4c4c4c4-0006-4000-8000-000000000006",
+      "name": "Alert Practice Manager",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1380, 540]
+    }
+  ],
+  "connections": {
+    "New Inbox Email (IMAP)": {
+      "main": [
+        [
+          {
+            "node": "Extract Sender, Subject, Snippet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Sender, Subject, Snippet": {
+      "main": [
+        [
+          {
+            "node": "Classify Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Email": {
+      "main": [
+        [
+          {
+            "node": "Log to Inbox Log Sheet",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Urgent Keyword Detected?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Urgent Keyword Detected?": {
+      "main": [
+        [
+          {
+            "node": "Alert Practice Manager",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "id": "email-triage-inbox-management"
+}

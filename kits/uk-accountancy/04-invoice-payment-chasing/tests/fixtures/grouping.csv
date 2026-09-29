@@ -1,0 +1,5 @@
+Invoice Number,Client,Client Email,Client Type,Amount GBP,Due Date,Status,Last Chase Stage,Last Chased On,Activation Date
+INV-5001,Multi Ltd,ap@multi.co.uk,Business,100.00,2026-09-05,Unpaid,,,2026-08-01
+INV-5002,Multi Ltd,ap@multi.co.uk,Business,200.00,2026-08-05,Unpaid,,,2026-07-01
+INV-5003,Multi Ltd,AP@MULTI.CO.UK,Business,300.00,2026-07-05,Unpaid,,,2026-06-01
+INV-5004,Solo Ltd,ap@solo.co.uk,Business,400.00,2026-09-05,Unpaid,,,2026-08-01

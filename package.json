@@ -1,0 +1,20 @@
+{
+  "name": "n8n-automation-kits",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Production n8n workflow kits for UK accountancy practices, with a verified core and test harness.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build-workflow.js",
+    "build:check": "node scripts/build-workflow.js --check",
+    "lint": "node scripts/lint-workflow.js",
+    "test:unit": "node --test kits/uk-accountancy/04-invoice-payment-chasing/tests/unit/*.test.js",
+    "test:property": "node --test kits/uk-accountancy/04-invoice-payment-chasing/tests/property/*.test.js",
+    "test:fault": "node --test kits/uk-accountancy/04-invoice-payment-chasing/tests/fault/*.test.js",
+    "test": "npm run build:check && npm run lint && node --test kits/uk-accountancy/04-invoice-payment-chasing/tests/unit/*.test.js kits/uk-accountancy/04-invoice-payment-chasing/tests/property/*.test.js kits/uk-accountancy/04-invoice-payment-chasing/tests/fault/*.test.js",
+    "drift": "node scripts/check-drift.js"
+  }
+}

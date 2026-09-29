@@ -1,0 +1,268 @@
+{
+  "name": "VAT Return Preparation Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 1 */3 *"
+            }
+          ]
+        }
+      },
+      "id": "f3f3f3f3-0001-4000-8000-000000000001",
+      "name": "Quarterly VAT Prep Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 320]
+    },
+    {
+      "parameters": {},
+      "id": "f3f3f3f3-0002-4000-8000-000000000002",
+      "name": "Manual Trigger (Run for a client now)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [260, 500]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.ACCOUNTING_API_BASE_URL }}/transactions/sales",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "period_start",
+              "value": "={{ $env.VAT_PERIOD_START }}"
+            },
+            {
+              "name": "period_end",
+              "value": "={{ $env.VAT_PERIOD_END }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.ACCOUNTING_API_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f3f3f3f3-0003-4000-8000-000000000003",
+      "name": "Fetch Sales Transactions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [560, 320]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.ACCOUNTING_API_BASE_URL }}/transactions/purchases",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "period_start",
+              "value": "={{ $env.VAT_PERIOD_START }}"
+            },
+            {
+              "name": "period_end",
+              "value": "={{ $env.VAT_PERIOD_END }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.ACCOUNTING_API_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f3f3f3f3-0004-4000-8000-000000000004",
+      "name": "Fetch Purchase Transactions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [560, 500]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "f3f3f3f3-0005-4000-8000-000000000005",
+      "name": "Merge Sales & Purchases",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [840, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compute draft Box 1-9 style VAT return figures from raw transactions.\n// Expects input item[0].json to contain { sales: [...], purchases: [...] }\n// where each transaction has: amountExVat, vatAmount, vatRate, supplierVatNumber (purchases only), isEUTransaction\n\nconst data = $input.first().json;\nconst sales = data.sales || [];\nconst purchases = data.purchases || [];\n\nconst sum = (arr, field) => arr.reduce((acc, t) => acc + (Number(t[field]) || 0), 0);\n\nconst box1_outputVat = sum(sales, 'vatAmount');\nconst box4_inputVat = sum(purchases, 'vatAmount');\nconst box6_totalSalesExVat = sum(sales, 'amountExVat');\nconst box7_totalPurchasesExVat = sum(purchases, 'amountExVat');\nconst box3_totalVatDue = box1_outputVat; // simplified: no acquisitions in this template\nconst box5_netVatDue = box3_totalVatDue - box4_inputVat;\n\nreturn [{\n  json: {\n    period: { start: $env.VAT_PERIOD_START, end: $env.VAT_PERIOD_END },\n    box1_vatDueOnSales: Number(box1_outputVat.toFixed(2)),\n    box3_totalVatDue: Number(box3_totalVatDue.toFixed(2)),\n    box4_vatReclaimedOnPurchases: Number(box4_inputVat.toFixed(2)),\n    box5_netVatDue: Number(box5_netVatDue.toFixed(2)),\n    box6_totalSalesExVat: Number(box6_totalSalesExVat.toFixed(2)),\n    box7_totalPurchasesExVat: Number(box7_totalPurchasesExVat.toFixed(2)),\n    salesCount: sales.length,\n    purchasesCount: purchases.length,\n    rawSales: sales,\n    rawPurchases: purchases\n  }\n}];"
+      },
+      "id": "f3f3f3f3-0006-4000-8000-000000000006",
+      "name": "Compute Draft VAT Figures",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Flag anomalies that need human review before submission.\nconst LARGE_TXN_THRESHOLD = Number($env.LARGE_TRANSACTION_THRESHOLD || 10000);\nconst VAT_NUMBER_CHECK_THRESHOLD = Number($env.VAT_NUMBER_CHECK_THRESHOLD || 135);\n\nconst input = $input.first().json;\nconst anomalies = [];\n\nfor (const t of input.rawSales) {\n  if (Math.abs(Number(t.amountExVat)) >= LARGE_TXN_THRESHOLD) {\n    anomalies.push(`Large sales transaction: ${t.description || t.id} (£${t.amountExVat})`);\n  }\n}\n\nfor (const t of input.rawPurchases) {\n  if (Math.abs(Number(t.amountExVat)) >= LARGE_TXN_THRESHOLD) {\n    anomalies.push(`Large purchase transaction: ${t.description || t.id} (£${t.amountExVat})`);\n  }\n  if (Number(t.vatAmount) < 0) {\n    anomalies.push(`Negative VAT amount on purchase: ${t.description || t.id}`);\n  }\n  if (Number(t.amountExVat) >= VAT_NUMBER_CHECK_THRESHOLD && !t.supplierVatNumber) {\n    anomalies.push(`Purchase above £${VAT_NUMBER_CHECK_THRESHOLD} missing supplier VAT number: ${t.description || t.id}`);\n  }\n}\n\nreturn [{\n  json: {\n    ...input,\n    anomalyCount: anomalies.length,\n    anomalies\n  }\n}];"
+      },
+      "id": "f3f3f3f3-0007-4000-8000-000000000007",
+      "name": "Flag Anomalies",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 400]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "aa1aa1aa-0001-4000-8000-000000000001",
+              "name": "summaryText",
+              "type": "string",
+              "value": "=DRAFT VAT RETURN SUMMARY - FOR REVIEW ONLY, NOT SUBMITTED\nPeriod: {{ $json.period.start }} to {{ $json.period.end }}\n\nBox 1 (VAT due on sales): £{{ $json.box1_vatDueOnSales }}\nBox 3 (Total VAT due): £{{ $json.box3_totalVatDue }}\nBox 4 (VAT reclaimed on purchases): £{{ $json.box4_vatReclaimedOnPurchases }}\nBox 5 (Net VAT due): £{{ $json.box5_netVatDue }}\nBox 6 (Total sales ex VAT): £{{ $json.box6_totalSalesExVat }}\nBox 7 (Total purchases ex VAT): £{{ $json.box7_totalPurchasesExVat }}\n\nTransactions reviewed: {{ $json.salesCount }} sales, {{ $json.purchasesCount }} purchases\n\nAnomalies flagged ({{ $json.anomalyCount }}):\n{{ $json.anomalies.length ? $json.anomalies.map(a => '- ' + a).join('\\n') : 'None' }}\n\nThis is a DRAFT for accountant review only. It has NOT been submitted to HMRC. Submission must be done manually via MTD-compatible software after review."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f3f3f3f3-0008-4000-8000-000000000008",
+      "name": "Format Draft Summary",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1680, 400]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.PRACTICE_SENDER_EMAIL }}",
+        "toEmail": "={{ $env.REVIEWING_ACCOUNTANT_EMAIL }}",
+        "subject": "=Draft VAT Return for review - {{ $env.CLIENT_NAME }} ({{ $json.period.start }} to {{ $json.period.end }})",
+        "emailFormat": "text",
+        "text": "={{ $json.summaryText }}",
+        "options": {}
+      },
+      "id": "f3f3f3f3-0009-4000-8000-000000000009",
+      "name": "Email Draft to Reviewing Accountant",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1960, 400]
+    }
+  ],
+  "connections": {
+    "Quarterly VAT Prep Schedule": {
+      "main": [
+        [
+          {
+            "node": "Fetch Sales Transactions",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Purchase Transactions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger (Run for a client now)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Sales Transactions",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Purchase Transactions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Sales Transactions": {
+      "main": [
+        [
+          {
+            "node": "Merge Sales & Purchases",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Purchase Transactions": {
+      "main": [
+        [
+          {
+            "node": "Merge Sales & Purchases",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Sales & Purchases": {
+      "main": [
+        [
+          {
+            "node": "Compute Draft VAT Figures",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Draft VAT Figures": {
+      "main": [
+        [
+          {
+            "node": "Flag Anomalies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flag Anomalies": {
+      "main": [
+        [
+          {
+            "node": "Format Draft Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Draft Summary": {
+      "main": [
+        [
+          {
+            "node": "Email Draft to Reviewing Accountant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "id": "vat-return-preparation-workflow"
+}
