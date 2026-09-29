@@ -1,0 +1,96 @@
+name: Auto-merge
+
+# Branches named auto/* are merged once CI passes, unless a safety check below
+# says a person must look first. Branches named review/* get a PR and always
+# wait for a person. Set the repository variable AUTOMERGE to "off" to stop
+# all automatic merging.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      (startsWith(github.event.workflow_run.head_branch, 'auto/') ||
+       startsWith(github.event.workflow_run.head_branch, 'review/')) &&
+      vars.AUTOMERGE != 'off'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BRANCH: ${{ github.event.workflow_run.head_branch }}
+      SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Skip if the branch has moved on
+        id: current
+        run: |
+          latest=$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)
+          if [ "$latest" != "$SHA" ]; then
+            echo "A newer commit is on $BRANCH; its own CI run will handle it."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open a pull request if there is none
+        if: steps.current.outputs.skip != 'true'
+        run: |
+          state=$(gh pr view "$BRANCH" --json state -q .state 2>/dev/null || true)
+          if [ "$state" != "OPEN" ]; then
+            gh pr create --head "$BRANCH" --base main \
+              --title "$(git log -1 --format=%s)" \
+              --body "$(git log -1 --format=%b)"
+          fi
+
+      - name: Safety checks
+        if: steps.current.outputs.skip != 'true'
+        id: gate
+        run: |
+          reasons=""
+          case "$BRANCH" in
+            review/*) reasons="${reasons}- This branch is marked for human review."$'\n' ;;
+          esac
+          changed=$(git diff --name-only origin/main...HEAD)
+          if echo "$changed" | grep -q '^\.github/'; then
+            reasons="${reasons}- It changes CI or automation files."$'\n'
+          fi
+          # UK rules already published in a kit on main are never changed
+          # without a person. New kits, and bank holidays, are exempt.
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in *bank-holidays.json) continue ;; esac
+            kit=$(echo "$f" | cut -d/ -f1-3)
+            if git cat-file -e "origin/main:$kit" 2>/dev/null; then
+              reasons="${reasons}- It changes published UK rules: \`$f\`"$'\n'
+            fi
+          done <<< "$(echo "$changed" | grep -E '^kits/[^/]+/[^/]+/rules/' || true)"
+          {
+            echo "reasons<<EOF"
+            printf '%s' "$reasons"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Merge
+        if: steps.current.outputs.skip != 'true' && steps.gate.outputs.reasons == ''
+        run: gh pr merge "$BRANCH" --squash --delete-branch --match-head-commit "$SHA"
+
+      - name: Ask for a person
+        if: steps.current.outputs.skip != 'true' && steps.gate.outputs.reasons != ''
+        env:
+          REASONS: ${{ steps.gate.outputs.reasons }}
+        run: |
+          marker="<!-- needs-human:$SHA -->"
+          if ! gh pr view "$BRANCH" --json comments -q '.comments[].body' | grep -qF "$marker"; then
+            gh pr comment "$BRANCH" --body "$(printf '%s\n**Waiting for a person to review before merging.** CI passed, but:\n\n%s' "$marker" "$REASONS")"
+          fi

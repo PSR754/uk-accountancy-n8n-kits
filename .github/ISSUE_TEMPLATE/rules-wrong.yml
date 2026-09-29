@@ -1,0 +1,22 @@
+name: A UK rule or date looks wrong
+description: A deadline, threshold, rate or bank holiday in a kit does not match HMRC or Companies House.
+title: "Rule check: "
+labels: [rules]
+body:
+  - type: input
+    id: kit
+    attributes:
+      label: Which kit?
+      placeholder: e.g. 02-mtd-vat-reminders
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What does the kit say, and what should it say?
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Source (gov.uk or legislation link, if you have one)

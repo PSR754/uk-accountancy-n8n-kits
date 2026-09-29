@@ -1,0 +1,79 @@
+name: Release
+
+# Publishes a GitHub release whenever the newest version heading in
+# CHANGELOG.md (for example "## [0.2.0] - 2026-10-12") has no matching tag.
+# Each kit is attached as an importable zip.
+
+on:
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: [Auto-merge]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Find the version to release
+        id: version
+        run: |
+          ver=$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
+          if [ -z "$ver" ]; then
+            echo "No released version in CHANGELOG.md yet."
+          elif git rev-parse -q --verify "refs/tags/v$ver" >/dev/null; then
+            echo "v$ver is already released."
+          else
+            echo "tag=v$ver" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.version.outputs.tag
+        with:
+          node-version: '22'
+
+      - name: Verify
+        if: steps.version.outputs.tag
+        run: npm test
+
+      - name: Package each kit
+        if: steps.version.outputs.tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          mkdir -p dist
+          for d in kits/uk-accountancy/[0-9]*/; do
+            slug=$(basename "$d")
+            files=()
+            for f in workflow.json README.md .env.example templates docs rules; do
+              [ -e "$d$f" ] && files+=("$f")
+            done
+            (cd "$d" && zip -qr "$GITHUB_WORKSPACE/dist/$slug-$TAG.zip" "${files[@]}")
+          done
+          ls dist
+
+      - name: Publish
+        if: steps.version.outputs.tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          ver="${TAG#v}"
+          awk -v v="[$ver]" '/^## \[/{p = index($0, v) > 0; next} p' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "See CHANGELOG.md." > notes.md
+          gh release create "$TAG" dist/*.zip --target "$(git rev-parse HEAD)" \
+            --title "$TAG" --notes-file notes.md
