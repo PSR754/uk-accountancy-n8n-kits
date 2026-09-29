@@ -1,0 +1,22 @@
+name: Something is not working
+description: A kit errors, skips rows, or sends the wrong thing.
+title: "Bug: "
+labels: [bug]
+body:
+  - type: input
+    id: kit
+    attributes:
+      label: Which kit?
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: Please remove any real client names, emails or tax references.
+    validations:
+      required: true
+  - type: input
+    id: n8n
+    attributes:
+      label: n8n version

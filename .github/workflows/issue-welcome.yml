@@ -1,0 +1,32 @@
+name: Issue welcome
+
+# Replies to every new issue with the same short, fixed message. Set the
+# repository variable ISSUE_WELCOME to "off" to stop it.
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  welcome:
+    if: vars.ISSUE_WELCOME != 'off'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - name: Reply
+        run: |
+          gh issue comment "$NUMBER" --repo "$GITHUB_REPOSITORY" --body "$(cat <<'EOF'
+          Thanks for getting in touch, and for helping make these kits better.
+
+          - **A UK date, threshold or rule looks wrong?** That is the top priority here and will be checked against gov.uk first.
+          - **Setup question?** Each kit's README has a numbered setup checklist, and kit 04 also has a runbook in `docs/RUNBOOK.md`.
+          - **Want a hand setting a kit up for your practice?** Email [office@parambir.com](mailto:office@parambir.com).
+
+          Every issue is read and you will get a reply here.
+          EOF
+          )"

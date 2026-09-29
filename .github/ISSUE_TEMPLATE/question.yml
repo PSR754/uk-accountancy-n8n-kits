@@ -1,0 +1,10 @@
+name: Question or idea
+description: Setup questions, or a kit you would like to see.
+labels: [question]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: Your question or idea
+    validations:
+      required: true
