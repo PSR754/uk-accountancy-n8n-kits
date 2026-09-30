@@ -82,11 +82,12 @@ npm run drift     # compare a live n8n workflow against this repo
 Pick whatever suits you, from a free tool to a full hand-over:
 
 <!-- CTA: free calculator (TODO link) -->
-<!-- CTA: free scorecard quiz (TODO link) -->
-<!-- CTA: newsletter, new kits and UK rule-change alerts (TODO link) -->
-<!-- CTA: book a call (TODO link) -->
 <!-- CTA: free done-for-you install (TODO link) -->
+- **Take the free Practice Value Diagnostic:** [see in pounds](https://www.parambir.com/scorecard) where your practice loses profit, cash and time, in about 8 minutes
+- **Join the monthly newsletter:** [one email a month](https://www.parambir.com/newsletter) with new projects and notes on small-company automation, nothing else
+- **Book a free 20-minute call:** [pick a time that suits you](https://www.parambir.com/call), no hard sell, just practical ideas for your practice
 - **Email me:** [office@parambir.com](mailto:office@parambir.com)
+- **More about me:** [parambir.com](https://www.parambir.com) and [LinkedIn](https://www.linkedin.com/in/parambir-randhawa)
 
 ## Licence
 
