@@ -22,7 +22,7 @@ That is deliberate: a day with no row at all is itself the signal.
 | Skipped | Rows not reminded about, for any reason |
 | Dry Run | `true` means nothing reached a client |
 | Note | `ok`, or the reason the run sent nothing |
-| Failures | Client, address and error for each failed send |
+| Failures | Client, address and error for each send that could not be confirmed, or was sent but not recorded |
 
 ---
 
@@ -96,16 +96,18 @@ understood too). The hold applies to that day only. Clear the cell to undo it.
 ## Note says "no preview email was delivered"
 
 The 09:00 run refuses to send unless the 08:30 run logged that the preview reached
-you. Either the preview run failed (check n8n's executions and your mail
-credential) or it did not run. Fix the cause, then run the preview and the send
+you. Either the preview run failed (the `Run Log` shows Mode `preview failed` and
+you are emailed, if your mail is working; check your mail credential) or it did not run. Fix the cause, then run the preview and the send
 again in that order.
 
 ## Sent Not Recorded is above 0, or the alert says "SENT, NOT RECORDED"
 
 The email reached the client, but writing the `Sent Log` or the `Deadlines` tab
-failed (usually a Google Sheets quota or permission error). Check both tabs. If
-the `Sent Log` row is missing, add it by hand (the alert names the client), or the
-same reminder may be planned again tomorrow. Later clients were still emailed.
+failed (usually a Google Sheets quota or permission error). Both writes are always
+attempted, so if only one failed the other still protects against a repeat. Check
+both tabs. If the `Deadlines` row was not updated **and** the `Sent Log` row is
+missing, fix one by hand (the alert names the client), or the same reminder may be
+planned again tomorrow. Later clients were still emailed.
 
 ## Note says "settings to fix before going live"
 
@@ -113,6 +115,13 @@ With `DRY_RUN=false`, `SENDER_EMAIL` or `PRACTICE_EMAIL` is empty or still an ex
 address. Nothing is sent. Set both to real addresses. If `PRACTICE_EMAIL` is the one
 that is empty, the alert cannot be delivered either, so the run ends red in n8n:
 this is the case an Error Workflow exists for.
+
+## An alert says the Run Log row could not be written
+
+The `Run Log` write failed (usually Google Sheets or its credential). It does not
+stop the run, and you are alerted instead. If this alert also fails to send, the
+run ends red in n8n. **Set an Error Workflow** (workflow settings) that emails you:
+it is the safety net for this and for a failed read of the sheet.
 
 ## The alert says the 09:00 run "sent nothing"
 
@@ -129,8 +138,9 @@ cell rather than racing the clock.
 ## An email failed to send
 
 The `Run Log` row shows `Emails Failed` and the error under `Failures`, and you
-are emailed. Nothing is recorded for a failed send, so it is planned again on the
-next working day. Failed sends are not retried automatically, because a timeout can
+are emailed. The send is **unconfirmed**, not necessarily undelivered: a timeout
+after the mail server accepted the message may still mean it went, so check your
+sent mail. Nothing is recorded for it, so it is planned again on the next working day. Failed sends are not retried automatically, because a timeout can
 happen after the mail server accepted the message. Check with your mail provider
 if you need to know whether it went.
 

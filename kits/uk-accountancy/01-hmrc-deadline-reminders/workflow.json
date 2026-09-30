@@ -329,7 +329,8 @@
       },
       "retryOnFail": true,
       "maxTries": 2,
-      "waitBetweenTries": 3000
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
     },
     {
       "id": "any-emails",
@@ -425,7 +426,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// GENERATED FILE. Do not edit this node in the n8n editor.\n// Source: kits/uk-accountancy/01-hmrc-deadline-reminders/src/core/\n// Rebuild with `npm run build`. CI fails if this drifts from the source.\n\n// The send failed. Nothing has been recorded, so the reminder is planned again\n// on the next working day. The failure is carried to the run summary and the\n// practice is alerted, rather than the client silently missing a reminder.\nconst action = $('One Client At A Time').first().json;\nconst failed = $input.all()[0];\nconst err = failed && failed.json ? failed.json.error : null;\nconst message = typeof err === 'string' ? err : ((err && (err.message || err.description)) || 'send failed');\nreturn [{\n  json: {\n    status: 'failed',\n    clientName: action.clientName,\n    recipient: action.realRecipient,\n    error: String(message).slice(0, 300),\n  },\n  pairedItem: { item: 0 },\n}];"
+        "jsCode": "// GENERATED FILE. Do not edit this node in the n8n editor.\n// Source: kits/uk-accountancy/01-hmrc-deadline-reminders/src/core/\n// Rebuild with `npm run build`. CI fails if this drifts from the source.\n\n// The send could not be confirmed (it may or may not have been delivered).\n// Nothing has been recorded, so the reminder is planned again\n// on the next working day. The failure is carried to the run summary and the\n// practice is alerted, rather than the client silently missing a reminder.\nconst action = $('One Client At A Time').first().json;\nconst failed = $input.all()[0];\nconst err = failed && failed.json ? failed.json.error : null;\nconst message = typeof err === 'string' ? err : ((err && (err.message || err.description)) || 'send failed');\nreturn [{\n  json: {\n    status: 'failed',\n    clientName: action.clientName,\n    recipient: action.realRecipient,\n    error: String(message).slice(0, 300),\n  },\n  pairedItem: { item: 0 },\n}];"
       }
     },
     {
@@ -530,44 +531,12 @@
       }
     },
     {
-      "id": "ledger-ok",
-      "name": "Sent Log Write Failed",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        3150,
-        -160
-      ],
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "c1",
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              },
-              "leftValue": "={{ $json.ledgerFailed }}",
-              "rightValue": ""
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      }
-    },
-    {
       "id": "write-back",
       "name": "Update Sheet Status",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
-        3370,
+        3260,
         -160
       ],
       "parameters": {
@@ -614,7 +583,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// GENERATED FILE. Do not edit this node in the n8n editor.\n// Source: kits/uk-accountancy/01-hmrc-deadline-reminders/src/core/\n// Rebuild with `npm run build`. CI fails if this drifts from the source.\n\n// The one way back into the loop after a send, whichever way the recording\n// went, so a client with several deadline rows re-enters the loop exactly once\n// and is counted exactly once. Reads the loop item by name, because the node\n// before this is a Sheets write whose output is not the client's row. Sheets\n// write nodes are set to continue on error, so a failure arrives here as an\n// item carrying an error, not as a second path.\nconst action = $('One Client At A Time').first().json;\nconst arrived = $input.all().map((i) => i.json || {});\nconst bad = arrived.find((i) => i.error || i.ledgerFailed);\nlet status = 'sent';\nlet error = '';\nif (action.record === false) {\n  status = 'sent (dry run)';\n} else if (bad) {\n  status = 'write_failed';\n  const e = bad.error || bad.ledgerError;\n  error = String(typeof e === 'string' ? e : ((e && (e.message || e.description)) || 'write failed')).slice(0, 300);\n}\nreturn [{\n  json: {\n    status,\n    clientName: action.clientName,\n    recipient: action.realRecipient,\n    error,\n  },\n  pairedItem: { item: 0 },\n}];"
+        "jsCode": "// GENERATED FILE. Do not edit this node in the n8n editor.\n// Source: kits/uk-accountancy/01-hmrc-deadline-reminders/src/core/\n// Rebuild with `npm run build`. CI fails if this drifts from the source.\n\n// The one way back into the loop after a send, whichever way the recording\n// went, so a client with several deadline rows re-enters the loop exactly once\n// and is counted exactly once. Reads the loop item by name, because the node\n// before this is a Sheets write whose output is not the client's row. Sheets\n// write nodes are set to continue on error, so a failure arrives here as an\n// item carrying an error, not as a second path.\nconst action = $('One Client At A Time').first().json;\nconst arrived = $input.all().map((i) => i.json || {});\nlet status = 'sent';\nlet error = '';\nif (action.record === false) {\n  // Dry run: Rows To Record, the Sent Log append and Carry Rows never ran on\n  // this path, so Carry Rows must not be read at all (n8n throws for a node\n  // that has not executed).\n  status = 'sent (dry run)';\n} else {\n  // The Sent Log append is reported by Carry Rows; the Deadlines update reports\n  // itself. Either counts, and both were attempted, so the Deadlines row is\n  // updated even when the Sent Log write failed.\n  const carried = $('Carry Rows').all().map((i) => i.json || {});\n  const bad = arrived.find((i) => i.error) || carried.find((i) => i.ledgerFailed);\n  if (bad) {\n    status = 'write_failed';\n    const e = bad.error || bad.ledgerError;\n    error = String(typeof e === 'string' ? e : ((e && (e.message || e.description)) || 'write failed')).slice(0, 300);\n  }\n}\nreturn [{\n  json: {\n    status,\n    clientName: action.clientName,\n    recipient: action.realRecipient,\n    error,\n  },\n  pairedItem: { item: 0 },\n}];"
       }
     },
     {
@@ -628,7 +597,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// GENERATED FILE. Do not edit this node in the n8n editor.\n// Source: kits/uk-accountancy/01-hmrc-deadline-reminders/src/core/\n// Rebuild with `npm run build`. CI fails if this drifts from the source.\n\n// One item, one Run Log row, for every kind of run. Counts what the loop\n// reports; runs that never reached the loop report zero for everything.\nconst planned = $('Plan Run').first().json;\nconst items = $input.all().map((i) => i.json);\nconst sent = items.filter((i) => i.status === 'sent').length;\nconst dryRunSends = items.filter((i) => i.status === 'sent (dry run)').length;\nconst failures = items.filter((i) => i.status === 'failed');\nconst writeFailures = items.filter((i) => i.status === 'write_failed');\nconst s = planned.summary;\n// A halt is worth an email on the 09:00 run unless it is the practice's own hold.\nconst haltAlert = planned.mode === 'send' && (s.alertable === true);\nconst alert = failures.length > 0 || writeFailures.length > 0 || haltAlert;\nconst note = s.haltReason || s.notSendableReason\n  || (failures.length ? failures.length + ' send(s) failed and will be retried on the next run'\n    : writeFailures.length ? writeFailures.length + ' email(s) were sent but could not be recorded: check the Sent Log and Deadlines tabs'\n      : 'ok');\nconst line = (f) => f.clientName + ' (' + f.recipient + '): ' + f.error;\nconst failureText = failures.map((f) => 'NOT SENT ' + line(f))\n  .concat(writeFailures.map((f) => 'SENT, NOT RECORDED ' + line(f))).join('\\n');\nconst parts = [];\nif (haltAlert) parts.push('The 09:00 run sent nothing: ' + (s.haltReason || s.notSendableReason) + '.');\nif (failures.length) parts.push('These reminders were NOT sent and nothing was recorded for them, so they will be tried again on the next working day:\\n' + failures.map(line).join('\\n'));\nif (writeFailures.length) parts.push('These emails WERE sent, but recording them failed. Check the Sent Log and Deadlines tabs before the next run, because a reminder that is not recorded can be planned again:\\n' + writeFailures.map(line).join('\\n'));\nreturn [{\n  json: {\n    'Run Date': planned.today,\n    Mode: planned.mode,\n    'Rows Read': s.rowsRead,\n    Upcoming: s.upcoming,\n    'Emails Planned': s.emails,\n    'Emails Sent': sent,\n    'Dry Run Sends': dryRunSends,\n    'Emails Failed': failures.length,\n    'Sent Not Recorded': writeFailures.length,\n    Skipped: s.skipped,\n    'Dry Run': s.dryRun,\n    Note: note,\n    Failures: failureText,\n    failedCount: failures.length + writeFailures.length,\n    alert,\n    alertSubject: haltAlert && !failures.length && !writeFailures.length\n      ? 'Reminder run on ' + planned.today + ' sent nothing'\n      : 'Reminder run on ' + planned.today + ': ' + (failures.length + writeFailures.length) + ' problem(s) with sends',\n    alertBody: parts.join('\\n\\n'),\n  },\n  pairedItem: { item: 0 },\n}];"
+        "jsCode": "// GENERATED FILE. Do not edit this node in the n8n editor.\n// Source: kits/uk-accountancy/01-hmrc-deadline-reminders/src/core/\n// Rebuild with `npm run build`. CI fails if this drifts from the source.\n\n// One item, one Run Log row, for every kind of run. Counts what the loop\n// reports; runs that never reached the loop report zero for everything.\nconst planned = $('Plan Run').first().json;\nconst items = $input.all().map((i) => i.json);\nconst sent = items.filter((i) => i.status === 'sent').length;\nconst dryRunSends = items.filter((i) => i.status === 'sent (dry run)').length;\nconst failures = items.filter((i) => i.status === 'failed');\nconst writeFailures = items.filter((i) => i.status === 'write_failed');\nconst s = planned.summary;\n// On the 08:30 run the only items arriving here are the preview email's result.\n// A failed preview arrives on the email node's error output.\nconst previewFailure = planned.mode === 'preview' ? items.find((i) => i.error) : null;\nconst previewFailed = Boolean(previewFailure);\nconst previewError = previewFailed\n  ? String(typeof previewFailure.error === 'string' ? previewFailure.error : (previewFailure.error.message || 'send failed')).slice(0, 300)\n  : '';\n// A halt is worth an email on the 09:00 run unless it is the practice's own hold.\nconst haltAlert = planned.mode === 'send' && (s.alertable === true);\nconst alert = failures.length > 0 || writeFailures.length > 0 || haltAlert || previewFailed;\nconst note = (previewFailed ? 'the preview email could not be sent (' + previewError + '), so the 09:00 run will send nothing' : '') || s.haltReason || s.notSendableReason\n  || (failures.length ? failures.length + ' send(s) could not be confirmed and will be planned again on the next run'\n    : writeFailures.length ? writeFailures.length + ' email(s) were sent but could not be recorded: check the Sent Log and Deadlines tabs'\n      : 'ok');\nconst line = (f) => f.clientName + ' (' + f.recipient + '): ' + f.error;\nconst failureText = failures.map((f) => 'NOT CONFIRMED SENT ' + line(f))\n  .concat(writeFailures.map((f) => 'SENT, NOT RECORDED ' + line(f))).join('\\n');\nconst parts = [];\nif (previewFailed) parts.push('The 08:30 preview email could not be sent (' + previewError + '). The 09:00 run only sends if the preview was delivered, so it will send nothing today unless you fix this and run the preview again.');\nif (haltAlert) parts.push('The 09:00 run sent nothing: ' + (s.haltReason || s.notSendableReason) + '.');\nif (failures.length) parts.push('These sends could NOT be confirmed. A send that times out after the mail server accepted it may still have been delivered, so check your sent mail if you need to be sure. Nothing was recorded for them, so they will be planned again on the next working day:\\n' + failures.map(line).join('\\n'));\nif (writeFailures.length) parts.push('These emails WERE sent, but recording them failed. Check the Sent Log and Deadlines tabs before the next run, because a reminder that is not recorded can be planned again:\\n' + writeFailures.map(line).join('\\n'));\nreturn [{\n  json: {\n    'Run Date': planned.today,\n    // A failed preview must not look like a delivered one: the 09:00 run looks\n    // for a Mode of exactly 'preview'.\n    Mode: previewFailed ? 'preview failed' : planned.mode,\n    'Rows Read': s.rowsRead,\n    Upcoming: s.upcoming,\n    'Emails Planned': s.emails,\n    'Emails Sent': sent,\n    'Dry Run Sends': dryRunSends,\n    'Emails Failed': failures.length,\n    'Sent Not Recorded': writeFailures.length,\n    Skipped: s.skipped,\n    'Dry Run': s.dryRun,\n    Note: note,\n    Failures: failureText,\n    failedCount: failures.length + writeFailures.length,\n    alert,\n    alertSubject: previewFailed ? 'The 08:30 preview for ' + planned.today + ' could not be sent'\n      : haltAlert && !failures.length && !writeFailures.length\n      ? 'Reminder run on ' + planned.today + ' sent nothing'\n      : 'Reminder run on ' + planned.today + ': ' + (failures.length + writeFailures.length) + ' problem(s) with sends',\n    alertBody: parts.join('\\n\\n'),\n  },\n  pairedItem: { item: 0 },\n}];"
       },
       "alwaysOutputData": true
     },
@@ -679,7 +648,22 @@
       "executeOnce": true,
       "retryOnFail": true,
       "maxTries": 3,
-      "waitBetweenTries": 5000
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "prepare-alert",
+      "name": "Prepare Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2600,
+        -300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// GENERATED FILE. Do not edit this node in the n8n editor.\n// Source: kits/uk-accountancy/01-hmrc-deadline-reminders/src/core/\n// Rebuild with `npm run build`. CI fails if this drifts from the source.\n\n// Runs after the Run Log write, which is allowed to fail without stopping the\n// run. A failed Run Log write is itself a reason to alert, so the alert does not\n// depend on the log being writable. Reads the summary by name.\nconst summary = $('Summarise Run').first().json;\nconst logWrite = $input.all()[0];\nconst logFailed = Boolean(logWrite && logWrite.json && logWrite.json.error);\nconst logError = logFailed\n  ? String(typeof logWrite.json.error === 'string' ? logWrite.json.error : (logWrite.json.error.message || 'write failed')).slice(0, 300)\n  : '';\nconst logNote = 'The Run Log row for this run could not be written (' + logError + '). Check the Run Log tab and your Google credential.';\nconst alert = summary.alert === true || logFailed;\nreturn [{\n  json: {\n    alert,\n    alertSubject: summary.alert === true ? summary.alertSubject : 'Reminder run on ' + summary['Run Date'] + ' could not write its Run Log row',\n    alertBody: [summary.alert === true ? summary.alertBody : '', logFailed ? logNote : ''].filter(Boolean).join('\\n\\n'),\n    logFailed,\n  },\n  pairedItem: { item: 0 },\n}];"
+      }
     },
     {
       "id": "any-failures",
@@ -687,8 +671,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        2380,
-        -480
+        2820,
+        -300
       ],
       "parameters": {
         "conditions": {
@@ -704,7 +688,7 @@
                 "operation": "true",
                 "singleValue": true
               },
-              "leftValue": "={{ $('Summarise Run').first().json.alert }}",
+              "leftValue": "={{ $json.alert }}",
               "rightValue": ""
             }
           ],
@@ -719,15 +703,15 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        2600,
-        -480
+        3040,
+        -300
       ],
       "parameters": {
         "fromEmail": "={{ $('Build Config').first().json.config.senderEmail }}",
         "toEmail": "={{ $('Build Config').first().json.practiceEmail }}",
-        "subject": "={{ $('Summarise Run').first().json.alertSubject }}",
+        "subject": "={{ $('Prepare Alert').first().json.alertSubject }}",
         "emailFormat": "text",
-        "text": "={{ $('Summarise Run').first().json.alertBody }}",
+        "text": "={{ $('Prepare Alert').first().json.alertBody }}",
         "options": {
           "appendAttribution": false
         }
@@ -896,6 +880,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Summarise Run",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1019,24 +1010,6 @@
       "main": [
         [
           {
-            "node": "Sent Log Write Failed",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Sent Log Write Failed": {
-      "main": [
-        [
-          {
-            "node": "Mark Sent",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
             "node": "Update Sheet Status",
             "type": "main",
             "index": 0
@@ -1078,6 +1051,17 @@
       ]
     },
     "Append Run Log": {
+      "main": [
+        [
+          {
+            "node": "Prepare Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Alert": {
       "main": [
         [
           {

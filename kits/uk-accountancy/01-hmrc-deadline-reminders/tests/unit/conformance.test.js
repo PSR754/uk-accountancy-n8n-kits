@@ -23,7 +23,8 @@ const nodeNamed = (name) => workflow.nodes.find((n) => n.name === name);
 /** Run a generated Code node's jsCode with n8n's globals stubbed out. */
 function runCodeNode(jsCode, { nodeOutputs = {}, env = {}, json = {}, inputItems = [] } = {}) {
   const $ = (name) => {
-    if (!(name in nodeOutputs)) throw new Error(`no output stubbed for node "${name}"`);
+    // n8n throws when an expression reads a node that has not executed on this path.
+    if (!(name in nodeOutputs)) throw new Error(`Referenced node is unexecuted: "${name}"`);
     const items = nodeOutputs[name].map((j) => ({ json: j }));
     return { all: () => items, first: () => items[0], item: items[0] };
   };
@@ -220,9 +221,11 @@ test('each client is recorded before the loop moves on, and every path returns t
   assert.equal(conns['Record This Send'].main[0][0].node, 'Rows To Record');
   assert.equal(conns['Rows To Record'].main[0][0].node, 'Append To Sent Log');
   assert.equal(conns['Append To Sent Log'].main[0][0].node, 'Carry Rows');
-  assert.equal(conns['Carry Rows'].main[0][0].node, 'Sent Log Write Failed');
-  assert.equal(conns['Sent Log Write Failed'].main[0][0].node, 'Mark Sent', 'a failed ledger write skips the sheet update');
-  assert.equal(conns['Sent Log Write Failed'].main[1][0].node, 'Update Sheet Status');
+  // Both writes are always attempted: a failed Sent Log append must not skip
+  // the Deadlines update, or neither dedupe layer is written.
+  assert.equal(conns['Carry Rows'].main[0].length, 1);
+  assert.equal(conns['Carry Rows'].main[0][0].node, 'Update Sheet Status');
+  assert.equal(workflow.nodes.some((n) => n.name === 'Sent Log Write Failed'), false);
   assert.equal(conns['Update Sheet Status'].main[0][0].node, 'Mark Sent');
   assert.equal(conns['Mark Sent'].main[0][0].node, 'One Client At A Time');
   assert.equal(conns['Record Failure'].main[0][0].node, 'One Client At A Time');
@@ -241,20 +244,30 @@ test('a client with several deadline rows re-enters the loop exactly once, wheth
     assert.equal(conns[name].main.length, 1, `${name} has more than one output`);
   }
   // Mixed results (some rows written, one failed) collapse to ONE item.
-  const run = (arrived, record = true) => runCodeNode(nodeNamed('Mark Sent').parameters.jsCode, {
-    nodeOutputs: { 'One Client At A Time': [{ clientName: 'Acme Ltd', realRecipient: 'a@acme.co.uk', record }] },
+  const run = (arrived, record = true, carried = [{ rowNumber: 2, ledgerFailed: false }]) => runCodeNode(nodeNamed('Mark Sent').parameters.jsCode, {
+    nodeOutputs: {
+      'One Client At A Time': [{ clientName: 'Acme Ltd', realRecipient: 'a@acme.co.uk', record }],
+      // null models the dry-run path, where Carry Rows has not executed.
+      ...(carried === null ? {} : { 'Carry Rows': carried }),
+    },
     inputItems: arrived,
   });
   const mixed = run([{ updatedRows: 1 }, { error: 'Quota exceeded' }, { updatedRows: 1 }]);
   assert.equal(mixed.length, 1);
   assert.equal(mixed[0].json.status, 'write_failed');
   assert.equal(mixed[0].json.error, 'Quota exceeded');
-  const ledger = run([{ rowNumber: 2, ledgerFailed: true, ledgerError: 'Sent Log 500' }, { rowNumber: 3, ledgerFailed: true, ledgerError: 'Sent Log 500' }]);
+  // The Sent Log append failed but the Deadlines update went through: still reported, once.
+  const ledger = run([{ updatedRows: 1 }, { updatedRows: 1 }], true, [
+    { rowNumber: 2, ledgerFailed: true, ledgerError: 'Sent Log 500' }, { rowNumber: 3, ledgerFailed: true, ledgerError: 'Sent Log 500' },
+  ]);
   assert.equal(ledger.length, 1);
   assert.equal(ledger[0].json.status, 'write_failed');
+  assert.equal(ledger[0].json.error, 'Sent Log 500');
   assert.equal(run([{ updatedRows: 1 }, { updatedRows: 1 }]).length, 1);
   assert.equal(run([{ updatedRows: 1 }])[0].json.status, 'sent');
   assert.equal(run([{ x: 1 }], false)[0].json.status, 'sent (dry run)');
+  assert.equal(run([{ x: 1 }], false, null)[0].json.status, 'sent (dry run)', 'dry run must not read Carry Rows, which has not executed');
+  assert.throws(() => run([{ x: 1 }], true, null), /unexecuted/, 'the harness must model n8n throwing for an unexecuted node');
   // Carry Rows reports a failed ledger append on every row, once.
   const carried = runCodeNode(nodeNamed('Carry Rows').parameters.jsCode, {
     nodeOutputs: { 'Rows To Record': [{ rowNumber: 2 }, { rowNumber: 3 }] },
@@ -320,8 +333,10 @@ test('a failed send is recorded, counted and alerted, and the loop continues', (
   assert.equal(s['Emails Sent'], 1);
   assert.equal(s['Dry Run Sends'], 1, 'dry run sends are counted apart from real ones');
   assert.equal(s['Emails Failed'], 1);
-  assert.match(s.Failures, /Acme Ltd \(a@acme\.co\.uk\): timeout/);
-  assert.match(s.Note, /1 send\(s\) failed/);
+  assert.match(s.Failures, /NOT CONFIRMED SENT Acme Ltd \(a@acme\.co\.uk\): timeout/);
+  assert.match(s.alertBody, /could NOT be confirmed[\s\S]*may still have been delivered/);
+  assert.doesNotMatch(s.alertBody, /were NOT sent/);
+  assert.match(s.Note, /1 send\(s\) could not be confirmed/);
   assert.match(s.alertBody, /Acme Ltd/);
   assert.equal(s.failedCount, 1);
   // Runs that never reach the loop still produce one well-formed row.
@@ -330,9 +345,10 @@ test('a failed send is recorded, counted and alerted, and the loop continues', (
   assert.equal(quiet['Emails Failed'], 0);
   assert.equal(quiet.Note, 'ok');
   // The alert goes to the practice when there is a failure, and only then.
-  assert.equal(conns['Append Run Log'].main[0][0].node, 'Any Failures');
+  assert.equal(conns['Append Run Log'].main[0][0].node, 'Prepare Alert');
+  assert.equal(conns['Prepare Alert'].main[0][0].node, 'Any Failures');
   assert.equal(conns['Any Failures'].main[0][0].node, 'Alert Practice Of Failures');
-  assert.match(JSON.stringify(nodeNamed('Any Failures').parameters), /\.alert/);
+  assert.match(JSON.stringify(nodeNamed('Any Failures').parameters), /json\.alert/);
   assert.equal(s.alert, true);
 });
 
@@ -341,7 +357,7 @@ test('every run path ends in one Summarise Run and one Run Log row', () => {
   assert.equal(conns['Preview or Send'].main[2][0].node, 'Summarise Run');
   assert.equal(conns['Any Emails To Send'].main[1][0].node, 'Summarise Run');
   assert.equal(conns['Summarise Run'].main.length, 1);
-  assert.equal(conns['Summarise Run'].main[0].length, 1, 'Summarise Run feeds only the Run Log, so the alert cannot run first');
+  assert.equal(conns['Summarise Run'].main[0].length, 1);
   assert.equal(conns['Summarise Run'].main[0][0].node, 'Append Run Log');
   assert.equal(nodeNamed('Append Run Log').executeOnce, true, 'the loop\'s done output carries every client; one row per run only');
   const cols = Object.keys(nodeNamed('Append Run Log').parameters.columns.value);
@@ -373,7 +389,7 @@ test('the Sheets reads run once each, so they cannot multiply N x M', () => {
 });
 
 test('a failed ledger, hold or run-log read, or a failed preview, stops the run instead of being swallowed', () => {
-  for (const name of ['Read Deadlines', 'Read Sent Log', 'Read Run Control', 'Read Run Log', 'Email Preview To Practice']) {
+  for (const name of ['Read Deadlines', 'Read Sent Log', 'Read Run Control', 'Read Run Log']) {
     const n = nodeNamed(name);
     assert.ok(!n.onError || n.onError === 'stopWorkflow', `${name} swallows errors (${n.onError})`);
   }
@@ -384,7 +400,9 @@ test('a failed ledger, hold or run-log read, or a failed preview, stops the run 
   assert.equal(out[0].json.sendable, false);
   assert.match(out[0].json.summary.haltReason, /no preview email was delivered/);
   // The preview writes its Run Log row only after the email succeeded.
-  assert.equal(conns['Email Preview To Practice'].main.length, 1);
+  const preview = nodeNamed('Email Preview To Practice');
+  assert.equal(preview.onError, 'continueErrorOutput');
+  assert.deepEqual(conns['Email Preview To Practice'].main.map((b) => b[0].node), ['Summarise Run', 'Summarise Run']);
 });
 
 test('there is no webhook and no state-changing link anywhere in the workflow or the emails', () => {
@@ -584,7 +602,7 @@ test('the alert email is only reached from Any Failures, and goes to the practic
   assert.equal(alertNode.onError, undefined, 'a failed alert must turn the run red, not be swallowed');
   assert.ok(!alertNode.alwaysOutputData);
   assert.match(alertNode.parameters.toEmail, /practiceEmail/);
-  for (const f of ['subject', 'text']) assert.match(alertNode.parameters[f], /\$\('Summarise Run'\)/, 'the alert must read the summary by name');
+  for (const f of ['subject', 'text']) assert.match(alertNode.parameters[f], /\$\('Prepare Alert'\)/, 'the alert must read its content by node name');
   assert.equal(alertNode.parameters.options.appendAttribution, false);
 });
 
@@ -624,4 +642,92 @@ test('Build Config passes PRACTICE_EMAIL into the config the planner checks', ()
   assert.equal(out.config.practiceEmail, 'owner@smith.co.uk');
   assert.equal(out.practiceEmail, 'owner@smith.co.uk');
   assert.equal(runCodeNode(nodeNamed('Build Config').parameters.jsCode, { env: {} })[0].json.config.practiceEmail, '');
+});
+
+test('the alert does not depend on the Run Log write: a failed Run Log row is itself alerted', () => {
+  assert.equal(nodeNamed('Append Run Log').onError, 'continueRegularOutput', 'a Sheets outage would silence the alert');
+  const prep = (summary, logItem) => runCodeNode(nodeNamed('Prepare Alert').parameters.jsCode, {
+    nodeOutputs: { 'Summarise Run': [{ 'Run Date': '2026-09-15', ...summary }] },
+    inputItems: [logItem],
+  })[0].json;
+  // Log written, nothing wrong: no alert.
+  assert.equal(prep({ alert: false }, { 'Run At': 'x' }).alert, false);
+  // Log written, send problems: the summary's alert is used as is.
+  const problems = prep({ alert: true, alertSubject: 'S', alertBody: 'B' }, { 'Run At': 'x' });
+  assert.deepEqual([problems.alert, problems.alertSubject, problems.alertBody], [true, 'S', 'B']);
+  // Log write failed on a clean run: alert about the log alone.
+  const logOnly = prep({ alert: false }, { error: 'Sheets 503' });
+  assert.equal(logOnly.alert, true);
+  assert.match(logOnly.alertSubject, /could not write its Run Log row/);
+  assert.match(logOnly.alertBody, /Sheets 503/);
+  // Both: one email covers both.
+  const both = prep({ alert: true, alertSubject: 'S', alertBody: 'B' }, { error: { message: 'Sheets 503' } });
+  assert.equal(both.alertSubject, 'S');
+  assert.match(both.alertBody, /^B\n\n.*Sheets 503/s);
+  // The alert send itself stays loud, and Any Failures reads Prepare Alert's item.
+  assert.equal(nodeNamed('Alert Practice Of Failures').onError, undefined);
+  assert.equal(conns['Any Failures'].main[0][0].node, 'Alert Practice Of Failures');
+});
+
+test('a failed 08:30 preview is logged and alerted, and cannot satisfy the 09:00 preview gate', () => {
+  const summarise = (items) => runCodeNode(nodeNamed('Summarise Run').parameters.jsCode, {
+    nodeOutputs: { 'Plan Run': [{ today: '2026-09-15', mode: 'preview', summary: {
+      rowsRead: 5, upcoming: 4, emails: 3, skipped: 1, dryRun: false, haltReason: null, notSendableReason: null, alertable: false } }] },
+    inputItems: items,
+  })[0].json;
+  const failed = summarise([{ error: { message: 'SMTP 550' } }]);
+  assert.equal(failed.alert, true);
+  assert.equal(failed.Mode, 'preview failed');
+  assert.match(failed.Note, /preview email could not be sent \(SMTP 550\)/);
+  assert.match(failed.alertSubject, /preview for 2026-09-15 could not be sent/);
+  assert.match(failed.alertBody, /will send nothing today/);
+  const ok = summarise([{ accepted: ['a@b.co.uk'] }]);
+  assert.equal(ok.alert, false);
+  assert.equal(ok.Mode, 'preview');
+  // The 09:00 gate needs a row whose Mode is exactly "preview".
+  const out = runCodeNode(nodeNamed('Plan Run').parameters.jsCode, {
+    nodeOutputs: { 'Build Config': [{ today: '2026-09-15', config, mode: 'send' }],
+      ...readers(fx('every-milestone.csv'), { 'Read Run Log': [{ 'Run Date': '2026-09-15', Mode: failed.Mode }] }) },
+  });
+  assert.equal(out[0].json.sendable, false);
+  assert.match(out[0].json.summary.haltReason, /no preview email was delivered/);
+});
+
+// --- Expressions must only read nodes that ran on every path to them -----------------
+
+test('AUDIT: every $(\'Node\') read in the workflow names a node that always executes before the reader', () => {
+  const nodes = workflow.nodes;
+  const names = new Set(nodes.map((n) => n.name));
+  const targets = (n) => Object.values(conns[n]?.main ?? []).flat().filter(Boolean).map((c) => c.node);
+  const triggers = nodes.filter((n) => /Trigger$/.test(n.type)).map((n) => n.name);
+  assert.ok(triggers.length >= 2);
+  const reachableAvoiding = (avoid) => {
+    const seen = new Set();
+    const stack = triggers.filter((t) => t !== avoid);
+    while (stack.length) {
+      const cur = stack.pop();
+      if (seen.has(cur) || cur === avoid) continue;
+      seen.add(cur);
+      stack.push(...targets(cur));
+    }
+    return seen;
+  };
+  // A read is safe if the referenced node lies on EVERY path from a trigger to the reader.
+  const alwaysBefore = (ref, reader) => ref !== reader && !reachableAvoiding(ref).has(reader);
+  // Guarded reads: allowed only when the code reads the node after checking it ran.
+  const GUARDED = { 'Mark Sent': { 'Carry Rows': /record === false[\s\S]*else[\s\S]*\$\('Carry Rows'\)/ } };
+  let checked = 0;
+  for (const n of nodes) {
+    const text = JSON.stringify(n.parameters ?? {}).replace(/\\"/g, '"');
+    const code = n.parameters?.jsCode ?? '';
+    const refs = new Set([...text.matchAll(/\$\('([^']+)'\)/g)].map((m) => m[1]));
+    for (const ref of refs) {
+      assert.ok(names.has(ref), `${n.name} reads $('${ref}'), which does not exist`);
+      checked += 1;
+      if (alwaysBefore(ref, n.name)) continue;
+      const guard = GUARDED[n.name]?.[ref];
+      assert.ok(guard && guard.test(code), `${n.name} reads $('${ref}'), which does not run on every path to it, and the read is not guarded`);
+    }
+  }
+  assert.ok(checked > 15, 'the audit found suspiciously few references');
 });

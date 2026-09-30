@@ -28,14 +28,14 @@ export function runOnce({ sheet, mailer, today, config, ledger = null, holdUntil
     }
     delivered.push(action);
     const mine = result.writeBacks.filter((w) => action.idempotencyKeys.includes(w.idempotencyKey));
-    // Mirrors the workflow: the ledger append, then the sheet update. A failure
-    // in either is caught (the error output), counted, and the loop moves on to
-    // the next client. The email has already gone, so it is not undone.
+    // Mirrors the workflow: the ledger append, then the sheet update, both
+    // always attempted. A failure in either is reported (once per client) and the
+    // loop moves on. The email has already gone, so it is not undone.
+    let writeFailed = false;
     try {
       if (ledger && mine.length) ledger.append(mine.map((w) => w.idempotencyKey));
     } catch (err) {
-      result.summary.writeFailed = (result.summary.writeFailed || 0) + 1;
-      continue; // no ledger row means the sheet update is skipped too
+      writeFailed = true;
     }
     for (const wb of mine) {
       try {
@@ -48,10 +48,10 @@ export function runOnce({ sheet, mailer, today, config, ledger = null, holdUntil
           },
         });
       } catch (err) {
-        result.summary.writeFailed = (result.summary.writeFailed || 0) + 1;
-        break;
+        writeFailed = true;
       }
     }
+    if (writeFailed) result.summary.writeFailed = (result.summary.writeFailed || 0) + 1;
   }
   return { ...result, delivered };
 }

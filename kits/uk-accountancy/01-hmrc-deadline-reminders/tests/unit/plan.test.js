@@ -313,6 +313,7 @@ test('the send run refuses to send unless today\'s preview was delivered', () =>
   assert.equal(gate(undefined).actions.length, 0);
   assert.equal(gate([{ 'Run Date': '2026-09-14', Mode: 'preview' }]).actions.length, 0, 'yesterday\'s preview does not count');
   assert.equal(gate([{ 'Run Date': '2026-09-15', Mode: 'send' }]).actions.length, 0, 'a send row is not a preview');
+  assert.equal(gate([{ 'Run Date': '2026-09-15', Mode: 'preview failed' }]).actions.length, 0, 'a failed preview is not a delivered one');
   assert.equal(gate([{ 'Run Date': '2026-09-15', Mode: 'preview' }]).actions.length, 1);
   assert.equal(gate([{ 'Run Date': '15/09/2026', Mode: ' Preview ' }]).actions.length, 1);
   // The preview run itself does not need one.

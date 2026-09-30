@@ -48,7 +48,7 @@ how the rest will follow. The other eight are as first written and have known de
 | | Kits 01 and 04 | Kits 02, 03, 05-10 |
 |---|---|---|
 | Decision logic | One pure function, no I/O, never throws | Spread across Code nodes and expressions |
-| Tests | 153 and 91, no credentials needed | None |
+| Tests | 157 and 91, no credentials needed | None |
 | `workflow.json` | Generated from the tested source; CI fails on drift | Hand-written |
 | Static checks | Passes | 35 errors, 46 warnings between them |
 
@@ -71,7 +71,7 @@ same mistakes cannot return quietly as the remaining kits are rebuilt.
 ## Working on this repository
 
 ```
-npm test          # build check, lint, and 244 tests
+npm test          # build check, lint, and 248 tests
 npm run build     # regenerate kits 01 and 04's workflow.json from src/core
 npm run lint      # static checks across every kit
 npm run drift     # compare a live n8n workflow against this repo

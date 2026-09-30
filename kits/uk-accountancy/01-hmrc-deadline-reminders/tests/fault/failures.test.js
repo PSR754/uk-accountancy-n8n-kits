@@ -80,7 +80,7 @@ test('a failing sheet write does not stop the other clients, and does not repeat
   assert.ok(mailer.sent.length >= sentSoFar);
 });
 
-test('a failing Sent Log append is counted, skips the sheet update, and still emails the other clients', () => {
+test('a failing Sent Log append is counted, still updates the Deadlines row, and still emails the other clients', () => {
   const sheet = fakeSheet(fx('every-milestone.csv'));
   const mailer = fakeMailer();
   const ledger = fakeLedger();
@@ -89,15 +89,11 @@ test('a failing Sent Log append is counted, skips the sheet update, and still em
   assert.ok(r.actions.length >= 3);
   assert.equal(r.summary.writeFailed, 1, 'the ledger failure was not counted, so the practice could not be alerted');
   assert.equal(mailer.sent.length, r.actions.length, 'a ledger failure stopped later clients being emailed');
-  // Everyone else was recorded; the first client was not.
   assert.equal(ledger.keys.length, r.writeBacks.length - r.actions[0].deadlines.length);
-  assert.equal(sheet.calls.updates.length, r.writeBacks.length - r.actions[0].deadlines.length);
+  assert.equal(sheet.calls.updates.length, r.writeBacks.length, 'the Deadlines row must still be updated when only the ledger failed');
 });
 
-test('KNOWN LIMIT: an email sent whose ledger append failed can be planned again the next day', () => {
-  // Documented in the README and the runbook, and the reason the practice is
-  // alerted with "SENT, NOT RECORDED". The test pins the behaviour so a change
-  // to it is a conscious one.
+test('a Sent Log failure alone does not cause a resend: the Deadlines marker still dedupes', () => {
   const sheet = fakeSheet(fx('every-milestone.csv'));
   const mailer = fakeMailer();
   const ledger = fakeLedger();
@@ -105,6 +101,22 @@ test('KNOWN LIMIT: an email sent whose ledger append failed can be planned again
   const first = runOnce({ sheet, mailer, ledger, today: TODAY, config });
   const unrecorded = first.actions[0].idempotencyKeys[0];
   assert.equal(ledger.keys.includes(unrecorded), false);
+  const next = runOnce({ sheet, mailer: fakeMailer(), ledger, today: '2026-09-16', config });
+  assert.equal(next.actions.some((a) => a.idempotencyKeys.includes(unrecorded)), false);
+});
+
+test('KNOWN LIMIT: if both the Sent Log append and the Deadlines update fail, that reminder can be planned again', () => {
+  // Both dedupe layers are then missing. It is reported as "SENT, NOT
+  // RECORDED" so the practice can fix the sheet before the next run. Pinned so
+  // a change to this behaviour is a conscious one.
+  const sheet = fakeSheet(fx('every-milestone.csv'));
+  const mailer = fakeMailer();
+  const ledger = fakeLedger();
+  ledger.failAppendOnce(new Error('Google Sheets 500'));
+  sheet.failUpdateOnce(new Error('Google Sheets 500'));
+  const first = runOnce({ sheet, mailer, ledger, today: TODAY, config });
+  assert.equal(first.summary.writeFailed, 1, 'one client, reported once, though both writes failed');
+  const unrecorded = first.actions[0].idempotencyKeys[0];
   const next = runOnce({ sheet, mailer: fakeMailer(), ledger, today: '2026-09-16', config });
   assert.ok(next.actions.some((a) => a.idempotencyKeys.includes(unrecorded)));
 });

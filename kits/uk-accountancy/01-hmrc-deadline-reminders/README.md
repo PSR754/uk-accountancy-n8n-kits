@@ -44,14 +44,15 @@ These are deliberate, and each one is enforced by a test.
 - **It will not send the same client two emails in one morning.** Every deadline
   that is due a reminder goes in one message, at the tone the nearest one warrants.
 - **It is built to send each reminder once, and says so honestly when it cannot.**
-  Each send is recorded in a separate `Sent Log` before the `Deadlines` tab is
-  updated, so a failed `Deadlines` update does not cause a repeat. Two cases are
+  Each send is recorded in two places, the `Sent Log` and the `Deadlines` tab, and
+  both are always attempted, so one failing does not cause a repeat. Two cases are
   outside its control, and in both you are emailed:
-  - If a send fails in a way that leaves it unclear whether the mail server
-    accepted it, it is not retried automatically. Nothing is recorded and it is
-    planned again on the next working day.
-  - If the email goes but the `Sent Log` append fails, the reminder is not
-    recorded and can be planned again tomorrow. The alert says which client to check.
+  - If a send fails or times out, it is reported as **unconfirmed**: a timeout
+    after the mail server accepted the message may still mean it was delivered.
+    It is not retried automatically, nothing is recorded, and it is planned again
+    on the next working day, so check your sent mail if you need to be sure.
+  - If the email goes but **both** recording writes fail, the reminder can be
+    planned again tomorrow. The alert says which client to check and fix.
 - **It will not record a dry run.** While `DRY_RUN=true` no reminder is written to
   the `Sent Log` or the `Deadlines` tab (the `Run Log` still gets its row), so
   switching dry run off never makes the kit believe a reminder has already gone.
@@ -59,8 +60,9 @@ These are deliberate, and each one is enforced by a test.
   be recorded, and a run that halts for any reason other than your own hold
   (no preview delivered, a bad setting, the send ceiling) are counted in the
   `Run Log`, described there, and emailed to `PRACTICE_EMAIL`. Later clients are
-  still emailed after one client's failure. If the alert email itself cannot be
-  sent, the run ends red in n8n, which is what the Error Workflow is for.
+  still emailed after one client's failure. The alert does not depend on the `Run Log`
+  being writable (a failed `Run Log` write is itself alerted). If the alert email
+  cannot be sent, the run ends red in n8n, so set the Error Workflow below.
 - **It will not miss a reminder because of a weekend.** If a reminder would fall
   on a day nothing is sent (a weekend or bank holiday), it goes on the last
   sending day before it. A Monday deadline gets its final reminder on the Friday.

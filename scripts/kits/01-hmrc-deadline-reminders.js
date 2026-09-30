@@ -214,15 +214,24 @@ return action.writeBacks.map((w, index) => ({
 // item carrying an error, not as a second path.
 const action = $('One Client At A Time').first().json;
 const arrived = $input.all().map((i) => i.json || {});
-const bad = arrived.find((i) => i.error || i.ledgerFailed);
 let status = 'sent';
 let error = '';
 if (action.record === false) {
+  // Dry run: Rows To Record, the Sent Log append and Carry Rows never ran on
+  // this path, so Carry Rows must not be read at all (n8n throws for a node
+  // that has not executed).
   status = 'sent (dry run)';
-} else if (bad) {
-  status = 'write_failed';
-  const e = bad.error || bad.ledgerError;
-  error = String(typeof e === 'string' ? e : ((e && (e.message || e.description)) || 'write failed')).slice(0, 300);
+} else {
+  // The Sent Log append is reported by Carry Rows; the Deadlines update reports
+  // itself. Either counts, and both were attempted, so the Deadlines row is
+  // updated even when the Sent Log write failed.
+  const carried = $('Carry Rows').all().map((i) => i.json || {});
+  const bad = arrived.find((i) => i.error) || carried.find((i) => i.ledgerFailed);
+  if (bad) {
+    status = 'write_failed';
+    const e = bad.error || bad.ledgerError;
+    error = String(typeof e === 'string' ? e : ((e && (e.message || e.description)) || 'write failed')).slice(0, 300);
+  }
 }
 return [{
   json: {
@@ -236,7 +245,8 @@ return [{
 
   const recordFailureNode = `${BANNER}
 
-// The send failed. Nothing has been recorded, so the reminder is planned again
+// The send could not be confirmed (it may or may not have been delivered).
+// Nothing has been recorded, so the reminder is planned again
 // on the next working day. The failure is carried to the run summary and the
 // practice is alerted, rather than the client silently missing a reminder.
 const action = $('One Client At A Time').first().json;
@@ -264,24 +274,34 @@ const dryRunSends = items.filter((i) => i.status === 'sent (dry run)').length;
 const failures = items.filter((i) => i.status === 'failed');
 const writeFailures = items.filter((i) => i.status === 'write_failed');
 const s = planned.summary;
+// On the 08:30 run the only items arriving here are the preview email's result.
+// A failed preview arrives on the email node's error output.
+const previewFailure = planned.mode === 'preview' ? items.find((i) => i.error) : null;
+const previewFailed = Boolean(previewFailure);
+const previewError = previewFailed
+  ? String(typeof previewFailure.error === 'string' ? previewFailure.error : (previewFailure.error.message || 'send failed')).slice(0, 300)
+  : '';
 // A halt is worth an email on the 09:00 run unless it is the practice's own hold.
 const haltAlert = planned.mode === 'send' && (s.alertable === true);
-const alert = failures.length > 0 || writeFailures.length > 0 || haltAlert;
-const note = s.haltReason || s.notSendableReason
-  || (failures.length ? failures.length + ' send(s) failed and will be retried on the next run'
+const alert = failures.length > 0 || writeFailures.length > 0 || haltAlert || previewFailed;
+const note = (previewFailed ? 'the preview email could not be sent (' + previewError + '), so the 09:00 run will send nothing' : '') || s.haltReason || s.notSendableReason
+  || (failures.length ? failures.length + ' send(s) could not be confirmed and will be planned again on the next run'
     : writeFailures.length ? writeFailures.length + ' email(s) were sent but could not be recorded: check the Sent Log and Deadlines tabs'
       : 'ok');
 const line = (f) => f.clientName + ' (' + f.recipient + '): ' + f.error;
-const failureText = failures.map((f) => 'NOT SENT ' + line(f))
+const failureText = failures.map((f) => 'NOT CONFIRMED SENT ' + line(f))
   .concat(writeFailures.map((f) => 'SENT, NOT RECORDED ' + line(f))).join('\\n');
 const parts = [];
+if (previewFailed) parts.push('The 08:30 preview email could not be sent (' + previewError + '). The 09:00 run only sends if the preview was delivered, so it will send nothing today unless you fix this and run the preview again.');
 if (haltAlert) parts.push('The 09:00 run sent nothing: ' + (s.haltReason || s.notSendableReason) + '.');
-if (failures.length) parts.push('These reminders were NOT sent and nothing was recorded for them, so they will be tried again on the next working day:\\n' + failures.map(line).join('\\n'));
+if (failures.length) parts.push('These sends could NOT be confirmed. A send that times out after the mail server accepted it may still have been delivered, so check your sent mail if you need to be sure. Nothing was recorded for them, so they will be planned again on the next working day:\\n' + failures.map(line).join('\\n'));
 if (writeFailures.length) parts.push('These emails WERE sent, but recording them failed. Check the Sent Log and Deadlines tabs before the next run, because a reminder that is not recorded can be planned again:\\n' + writeFailures.map(line).join('\\n'));
 return [{
   json: {
     'Run Date': planned.today,
-    Mode: planned.mode,
+    // A failed preview must not look like a delivered one: the 09:00 run looks
+    // for a Mode of exactly 'preview'.
+    Mode: previewFailed ? 'preview failed' : planned.mode,
     'Rows Read': s.rowsRead,
     Upcoming: s.upcoming,
     'Emails Planned': s.emails,
@@ -295,10 +315,34 @@ return [{
     Failures: failureText,
     failedCount: failures.length + writeFailures.length,
     alert,
-    alertSubject: haltAlert && !failures.length && !writeFailures.length
+    alertSubject: previewFailed ? 'The 08:30 preview for ' + planned.today + ' could not be sent'
+      : haltAlert && !failures.length && !writeFailures.length
       ? 'Reminder run on ' + planned.today + ' sent nothing'
       : 'Reminder run on ' + planned.today + ': ' + (failures.length + writeFailures.length) + ' problem(s) with sends',
     alertBody: parts.join('\\n\\n'),
+  },
+  pairedItem: { item: 0 },
+}];`;
+
+  const prepareAlertNode = `${BANNER}
+
+// Runs after the Run Log write, which is allowed to fail without stopping the
+// run. A failed Run Log write is itself a reason to alert, so the alert does not
+// depend on the log being writable. Reads the summary by name.
+const summary = $('Summarise Run').first().json;
+const logWrite = $input.all()[0];
+const logFailed = Boolean(logWrite && logWrite.json && logWrite.json.error);
+const logError = logFailed
+  ? String(typeof logWrite.json.error === 'string' ? logWrite.json.error : (logWrite.json.error.message || 'write failed')).slice(0, 300)
+  : '';
+const logNote = 'The Run Log row for this run could not be written (' + logError + '). Check the Run Log tab and your Google credential.';
+const alert = summary.alert === true || logFailed;
+return [{
+  json: {
+    alert,
+    alertSubject: summary.alert === true ? summary.alertSubject : 'Reminder run on ' + summary['Run Date'] + ' could not write its Run Log row',
+    alertBody: [summary.alert === true ? summary.alertBody : '', logFailed ? logNote : ''].filter(Boolean).join('\\n\\n'),
+    logFailed,
   },
   pairedItem: { item: 0 },
 }];`;
@@ -420,9 +464,9 @@ return [{
       },
     },
     {
-      // No onError: if the preview cannot be delivered the run stops with an
-      // error and no "preview" row reaches the Run Log, so the 09:00 send
-      // (which requires that row) sends nothing.
+      // A failed preview goes to Summarise Run on the error output, so it is
+      // logged and alerted, but the Run Log row says "preview failed", not
+      // "preview": the 09:00 send requires a "preview" row and so sends nothing.
       id: 'send-digest', name: 'Email Preview To Practice', type: 'n8n-nodes-base.emailSend',
       typeVersion: 2.1, position: [1500, -300],
       parameters: {
@@ -434,6 +478,7 @@ return [{
         options: { appendAttribution: false },
       },
       retryOnFail: true, maxTries: 2, waitBetweenTries: 3000,
+      onError: 'continueErrorOutput',
     },
     {
       id: 'any-emails', name: 'Any Emails To Send', type: 'n8n-nodes-base.if', typeVersion: 2.2,
@@ -535,13 +580,8 @@ return [{
       },
     },
     {
-      id: 'ledger-ok', name: 'Sent Log Write Failed', type: 'n8n-nodes-base.if', typeVersion: 2.2,
-      position: [3150, -160],
-      parameters: bool('={{ $json.ledgerFailed }}'),
-    },
-    {
       id: 'write-back', name: 'Update Sheet Status', type: 'n8n-nodes-base.googleSheets',
-      typeVersion: 4.5, position: [3370, -160],
+      typeVersion: 4.5, position: [3260, -160],
       parameters: {
         operation: 'update', documentId: doc(), sheetName: sheet('Deadlines'),
         columns: {
@@ -596,17 +636,21 @@ return [{
         options: { cellFormat: 'RAW' },
       },
       executeOnce: true,
-      ...retry,
+      ...retry, onError: 'continueRegularOutput',
+    },
+    {
+      id: 'prepare-alert', name: 'Prepare Alert', type: 'n8n-nodes-base.code', typeVersion: 2,
+      position: [2600, -300], parameters: { mode: 'runOnceForAllItems', jsCode: prepareAlertNode },
     },
     {
       id: 'any-failures', name: 'Any Failures', type: 'n8n-nodes-base.if', typeVersion: 2.2,
-      position: [2380, -480],
+      position: [2820, -300],
       parameters: {
         conditions: {
           options: { caseSensitive: true, version: 2 },
           conditions: [{
             id: 'c1', operator: { type: 'boolean', operation: 'true', singleValue: true },
-            leftValue: '={{ $(\'Summarise Run\').first().json.alert }}', rightValue: '',
+            leftValue: '={{ $json.alert }}', rightValue: '',
           }],
           combinator: 'and',
         },
@@ -615,13 +659,13 @@ return [{
     },
     {
       id: 'alert', name: 'Alert Practice Of Failures', type: 'n8n-nodes-base.emailSend',
-      typeVersion: 2.1, position: [2600, -480],
+      typeVersion: 2.1, position: [3040, -300],
       parameters: {
         fromEmail: '={{ $(\'Build Config\').first().json.config.senderEmail }}',
         toEmail: '={{ $(\'Build Config\').first().json.practiceEmail }}',
-        subject: '={{ $(\'Summarise Run\').first().json.alertSubject }}',
+        subject: '={{ $(\'Prepare Alert\').first().json.alertSubject }}',
         emailFormat: 'text',
-        text: '={{ $(\'Summarise Run\').first().json.alertBody }}',
+        text: '={{ $(\'Prepare Alert\').first().json.alertBody }}',
         options: { appendAttribution: false },
       },
       // No onError: if the alert cannot be delivered the run must end red, not
@@ -665,7 +709,7 @@ return [{
     'Preview or Send': {
       main: [to('Email Preview To Practice'), to('Any Emails To Send'), to('Summarise Run')],
     },
-    'Email Preview To Practice': { main: [to('Summarise Run')] },
+    'Email Preview To Practice': { main: [to('Summarise Run'), to('Summarise Run')] },
     'Any Emails To Send': { main: [to('Prepare Actions'), to('Summarise Run')] },
     'Prepare Actions': { main: [to('One Client At A Time')] },
     // Output 0 is "done", output 1 is "loop". Wiring the work to output 0 and
@@ -677,16 +721,19 @@ return [{
     'Record This Send': { main: [to('Rows To Record'), to('Mark Sent')] },
     'Rows To Record': { main: [to('Append To Sent Log')] },
     'Append To Sent Log': { main: [to('Carry Rows')] },
-    'Carry Rows': { main: [to('Sent Log Write Failed')] },
-    // true: the Sent Log write failed, so the sheet update is skipped and the
-    // failure is reported. false: carry on and update the Deadlines tab.
-    'Sent Log Write Failed': { main: [to('Mark Sent'), to('Update Sheet Status')] },
+    'Carry Rows': { main: [to('Update Sheet Status')] },
+    // Both writes are always attempted. If the Sent Log append failed, the
+    // Deadlines row is still updated, so one dedupe layer survives. Mark Sent
+    // reports whichever write failed.
     'Update Sheet Status': { main: [to('Mark Sent')] },
     'Mark Sent': { main: [to('One Client At A Time')] },
-    // Strictly in sequence, so the Run Log row is always written before any
-    // alert is attempted, whatever the workflow's execution order setting.
+    // In sequence, so the Run Log row is attempted before any alert whatever the
+    // execution order setting. The Run Log write may fail without stopping the
+    // run; Prepare Alert then turns that failure into an alert, and a failed
+    // alert send is left loud (no onError on it).
     'Summarise Run': { main: [to('Append Run Log')] },
-    'Append Run Log': { main: [to('Any Failures')] },
+    'Append Run Log': { main: [to('Prepare Alert')] },
+    'Prepare Alert': { main: [to('Any Failures')] },
     'Any Failures': { main: [to('Alert Practice Of Failures')] },
   };
 
