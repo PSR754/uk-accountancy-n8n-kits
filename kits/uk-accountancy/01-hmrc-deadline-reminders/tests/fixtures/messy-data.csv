@@ -1,0 +1,15 @@
+Client Name,Deadline Type,Due Date,Contact Email,Status,Last Reminder Sent,Reminded For Due Date,Last Reminded On
+,VAT return,2026-09-22,a@b.co.uk,Pending,,,
+No Type Ltd,,2026-09-22,a@b.co.uk,Pending,,,
+Bad Date Ltd,VAT return,31/02/2026,a@b.co.uk,Pending,,,
+Worded Date Ltd,VAT return,soon,a@b.co.uk,Pending,,,
+No Email Ltd,VAT return,2026-09-22,,Pending,,,
+Bad Email Ltd,VAT return,2026-09-22,not-an-email,Pending,,,
+Odd Status Ltd,VAT return,2026-09-22,a@b.co.uk,Maybe,,,
+UK Date Ltd,VAT return,22/09/2026,uk@date.co.uk,Pending,,,
+Overdue Ltd,VAT return,2026-09-01,overdue@x.co.uk,Pending,,,
+Filed Overdue Ltd,VAT return,2026-09-01,fo@x.co.uk,Filed,,,
+Dup Ltd,VAT return,2026-09-22,dup@x.co.uk,Pending,,,
+Dup Ltd,VAT return,2026-09-22,dup@x.co.uk,Pending,,,
+Blank Status Ltd,VAT return,2026-09-22,blank@x.co.uk,,,,
+Stale Marker Ltd,VAT return,2026-09-22,stale@x.co.uk,Pending,1,2025-09-22,2025-09-21

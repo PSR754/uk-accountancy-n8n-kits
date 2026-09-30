@@ -210,14 +210,21 @@ for (const kit of kits) {
 console.log(lines.join('\n'));
 console.log(`\n${kits.length} workflow${kits.length === 1 ? '' : 's'} checked: ${errors} error${errors === 1 ? '' : 's'}, ${warnings} warning${warnings === 1 ? '' : 's'}.`);
 
-// Only kit 04 is expected to be clean at this point; the others are reported
-// for information until they are rebuilt the same way.
+// Kits that have been rebuilt to the tested-core standard must lint clean of
+// errors; the others are reported for information until they are rebuilt.
+const REBUILT = ['01-hmrc-deadline-reminders', '04-invoice-payment-chasing'];
+
 if (only && errors > 0) process.exit(1);
 if (!only) {
-  const kit04 = lintFile(join(KITS, '04-invoice-payment-chasing', 'workflow.json'),
-    readFileSync(join(KITS, '04-invoice-payment-chasing', '.env.example'), 'utf8'));
-  if (kit04.some((f) => f.severity === 'error')) {
-    console.error('\nkit 04 has errors and is the kit under test.');
-    process.exit(1);
+  let failed = false;
+  for (const kit of REBUILT) {
+    const envPath = join(KITS, kit, '.env.example');
+    const found = lintFile(join(KITS, kit, 'workflow.json'),
+      existsSync(envPath) ? readFileSync(envPath, 'utf8') : null);
+    if (found.some((f) => f.severity === 'error')) {
+      console.error(`\nkit ${kit.slice(0, 2)} has errors and has been rebuilt to a clean standard.`);
+      failed = true;
+    }
   }
+  if (failed) process.exit(1);
 }

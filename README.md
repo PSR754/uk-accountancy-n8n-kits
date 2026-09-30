@@ -11,7 +11,7 @@ Want help putting these to work in your practice? See [Work with me](#work-with-
 
 | Kit | Description |
 | --- | --- |
-| [01-hmrc-deadline-reminders](kits/uk-accountancy/01-hmrc-deadline-reminders) | Staged email reminders for VAT, Self Assessment and Corporation Tax deadlines, driven by a Google Sheet client tracker. |
+| [01-hmrc-deadline-reminders](kits/uk-accountancy/01-hmrc-deadline-reminders) | **Tested core.** Staged email reminders at 30, 14, 7 and 1 days before each deadline in your Google Sheet, with a preview before anything sends, one email per client, and no deadline rules baked in. Reminds only; never files anything. |
 | [02-mtd-vat-reminders](kits/uk-accountancy/02-mtd-vat-reminders) | Calculates MTD VAT submission deadlines and sends a pre-submission digital records checklist to clients. |
 | [03-companies-house-deadline-tracker](kits/uk-accountancy/03-companies-house-deadline-tracker) | Tracks Confirmation Statement and Annual Accounts deadlines, cross-checked against the Companies House public API. |
 | [04-invoice-payment-chasing](kits/uk-accountancy/04-invoice-payment-chasing) | **Tested core; statutory rules awaiting sign-off (see its RULES.md).** Escalating GBP invoice chase emails with a preview before anything sends, one email per client, and statutory wording only where it applies. |
@@ -42,15 +42,15 @@ Want help putting these to work in your practice? See [Work with me](#work-with-
 
 ## Status
 
-Kit 04 has been rebuilt around a tested core and is the reference for how the
-rest will follow. The other nine are as first written and have known defects.
+Kits 01 and 04 have been rebuilt around a tested core and are the reference for
+how the rest will follow. The other eight are as first written and have known defects.
 
-| | Kit 04 | Kits 01-03, 05-10 |
+| | Kits 01 and 04 | Kits 02, 03, 05-10 |
 |---|---|---|
 | Decision logic | One pure function, no I/O, never throws | Spread across Code nodes and expressions |
-| Tests | 91, no credentials needed | None |
+| Tests | 153 and 91, no credentials needed | None |
 | `workflow.json` | Generated from the tested source; CI fails on drift | Hand-written |
-| Static checks | Passes | 38 errors, 52 warnings between them |
+| Static checks | Passes | 35 errors, 46 warnings between them |
 
 Run `npm run lint` for the current report on all ten.
 
@@ -71,8 +71,8 @@ same mistakes cannot return quietly as the remaining kits are rebuilt.
 ## Working on this repository
 
 ```
-npm test          # build check, lint, and 91 tests
-npm run build     # regenerate kit 04's workflow.json from src/core
+npm test          # build check, lint, and 244 tests
+npm run build     # regenerate kits 01 and 04's workflow.json from src/core
 npm run lint      # static checks across every kit
 npm run drift     # compare a live n8n workflow against this repo
 ```
