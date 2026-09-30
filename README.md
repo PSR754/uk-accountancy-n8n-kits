@@ -82,9 +82,9 @@ npm run drift     # compare a live n8n workflow against this repo
 Pick whatever suits you, from a free tool to a full hand-over:
 
 <!-- CTA: free calculator (TODO link) -->
-<!-- CTA: free scorecard quiz (TODO link) -->
 <!-- CTA: newsletter, new kits and UK rule-change alerts (TODO link) -->
 <!-- CTA: free done-for-you install (TODO link) -->
+- **Take the free Practice Value Diagnostic:** [see in pounds](https://www.parambir.com/scorecard) where your practice loses profit, cash and time, in about 8 minutes
 - **Book a free 20-minute call:** [pick a time that suits you](https://www.parambir.com/call), no hard sell, just practical ideas for your practice
 - **Email me:** [office@parambir.com](mailto:office@parambir.com)
 
