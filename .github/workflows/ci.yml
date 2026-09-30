@@ -17,20 +17,11 @@ jobs:
       # Fails if workflow.json has drifted from the source the tests verify.
       # Without this, an edit made in the n8n editor and pasted back could ship
       # code that nothing has ever tested.
-      - name: Workflow matches its source
-        run: npm run build:check
-
-      # n8n-specific static checks: the node defaults that do not appear in the
-      # exported JSON and that made the original defects invisible.
-      - name: Lint workflows
-        run: npm run lint
-
-      - name: Tests
-        run: |
-          node --test \
-            kits/uk-accountancy/04-invoice-payment-chasing/tests/unit/*.test.js \
-            kits/uk-accountancy/04-invoice-payment-chasing/tests/property/*.test.js \
-            kits/uk-accountancy/04-invoice-payment-chasing/tests/fault/*.test.js
+      # Build check (workflow.json matches its tested source), the n8n lint,
+      # and every kit's unit, property and fault tests, exactly as `npm test`
+      # runs them locally. New kits register their tests in package.json.
+      - name: Build check, lint and tests
+        run: npm test
 
       - name: No secrets in the repo
         run: |
