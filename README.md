@@ -85,7 +85,7 @@ Pick whatever suits you, from a free tool to a full hand-over:
 <!-- CTA: free scorecard quiz (TODO link) -->
 <!-- CTA: newsletter, new kits and UK rule-change alerts (TODO link) -->
 <!-- CTA: free done-for-you install (TODO link) -->
-- **Book a free 20-minute call:** [pick a time that suits you](https://cal.com/psr123/free-automation-chat-for-uk-accountancy-practics), no hard sell, just practical ideas for your practice
+- **Book a free 20-minute call:** [pick a time that suits you](https://cal.com/psr123/free-automation-chat-for-uk-accountancy-practices), no hard sell, just practical ideas for your practice
 - **Email me:** [office@parambir.com](mailto:office@parambir.com)
 
 ## Licence
