@@ -48,9 +48,13 @@ jobs:
         run: |
           state=$(gh pr view "$BRANCH" --json state -q .state 2>/dev/null || true)
           if [ "$state" != "OPEN" ]; then
+            # Name the PR after the branch's latest real commit, so a
+            # "Merge origin/main" commit never becomes the title.
+            last=$(git log -1 --no-merges --format=%H origin/main..HEAD)
+            last=${last:-HEAD}
             gh pr create --head "$BRANCH" --base main \
-              --title "$(git log -1 --format=%s)" \
-              --body "$(git log -1 --format=%b)"
+              --title "$(git log -1 --format=%s "$last")" \
+              --body "$(git log -1 --format=%b "$last")"
           fi
 
       - name: Safety checks
