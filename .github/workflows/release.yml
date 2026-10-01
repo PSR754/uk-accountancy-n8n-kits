@@ -2,7 +2,8 @@ name: Release
 
 # Publishes a GitHub release whenever the newest version heading in
 # CHANGELOG.md (for example "## [0.2.0] - 2026-10-12") has no matching tag.
-# Each kit is attached as an importable zip.
+# Each tested kit is attached as an importable zip. Add a kit's folder to
+# TESTED_KITS once it has a tested core.
 
 on:
   push:
@@ -57,8 +58,9 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           mkdir -p dist
-          for d in kits/uk-accountancy/[0-9]*/; do
-            slug=$(basename "$d")
+          TESTED_KITS="01-hmrc-deadline-reminders 04-invoice-payment-chasing"
+          for slug in $TESTED_KITS; do
+            d="kits/uk-accountancy/$slug/"
             files=()
             for f in workflow.json README.md .env.example templates docs rules; do
               [ -e "$d$f" ] && files+=("$f")
