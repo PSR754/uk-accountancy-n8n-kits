@@ -11,14 +11,17 @@
     "build": "node scripts/build-workflow.js",
     "build:check": "node scripts/build-workflow.js --check",
     "lint": "node scripts/lint-workflow.js",
-    "test:unit": "node --test kits/uk-accountancy/01-hmrc-deadline-reminders/tests/unit/*.test.js kits/uk-accountancy/04-invoice-payment-chasing/tests/unit/*.test.js",
-    "test:property": "node --test kits/uk-accountancy/01-hmrc-deadline-reminders/tests/property/*.test.js kits/uk-accountancy/04-invoice-payment-chasing/tests/property/*.test.js",
-    "test:fault": "node --test kits/uk-accountancy/01-hmrc-deadline-reminders/tests/fault/*.test.js kits/uk-accountancy/04-invoice-payment-chasing/tests/fault/*.test.js",
-    "test": "npm run build:check && npm run lint && node --test kits/uk-accountancy/01-hmrc-deadline-reminders/tests/unit/*.test.js kits/uk-accountancy/01-hmrc-deadline-reminders/tests/property/*.test.js kits/uk-accountancy/01-hmrc-deadline-reminders/tests/fault/*.test.js kits/uk-accountancy/04-invoice-payment-chasing/tests/unit/*.test.js kits/uk-accountancy/04-invoice-payment-chasing/tests/property/*.test.js kits/uk-accountancy/04-invoice-payment-chasing/tests/fault/*.test.js",
+    "test:unit": "node --test kits/uk-accountancy/01-hmrc-deadline-reminders/tests/unit/*.test.js kits/uk-accountancy/02-mtd-vat-reminders/tests/unit/*.test.js kits/uk-accountancy/04-invoice-payment-chasing/tests/unit/*.test.js",
+    "test:property": "node --test kits/uk-accountancy/01-hmrc-deadline-reminders/tests/property/*.test.js kits/uk-accountancy/02-mtd-vat-reminders/tests/property/*.test.js kits/uk-accountancy/04-invoice-payment-chasing/tests/property/*.test.js",
+    "test:fault": "node --test kits/uk-accountancy/01-hmrc-deadline-reminders/tests/fault/*.test.js kits/uk-accountancy/02-mtd-vat-reminders/tests/fault/*.test.js kits/uk-accountancy/04-invoice-payment-chasing/tests/fault/*.test.js",
+    "test": "npm run build:check && npm run lint && node --test kits/uk-accountancy/01-hmrc-deadline-reminders/tests/unit/*.test.js kits/uk-accountancy/01-hmrc-deadline-reminders/tests/property/*.test.js kits/uk-accountancy/01-hmrc-deadline-reminders/tests/fault/*.test.js kits/uk-accountancy/02-mtd-vat-reminders/tests/unit/*.test.js kits/uk-accountancy/02-mtd-vat-reminders/tests/property/*.test.js kits/uk-accountancy/02-mtd-vat-reminders/tests/fault/*.test.js kits/uk-accountancy/04-invoice-payment-chasing/tests/unit/*.test.js kits/uk-accountancy/04-invoice-payment-chasing/tests/property/*.test.js kits/uk-accountancy/04-invoice-payment-chasing/tests/fault/*.test.js",
     "drift": "node scripts/check-drift.js",
     "test:kit01": "node --test kits/uk-accountancy/01-hmrc-deadline-reminders/tests/unit/*.test.js kits/uk-accountancy/01-hmrc-deadline-reminders/tests/property/*.test.js kits/uk-accountancy/01-hmrc-deadline-reminders/tests/fault/*.test.js",
+    "test:kit02": "node --test kits/uk-accountancy/02-mtd-vat-reminders/tests/unit/*.test.js kits/uk-accountancy/02-mtd-vat-reminders/tests/property/*.test.js kits/uk-accountancy/02-mtd-vat-reminders/tests/fault/*.test.js",
     "test:kit04": "node --test kits/uk-accountancy/04-invoice-payment-chasing/tests/unit/*.test.js kits/uk-accountancy/04-invoice-payment-chasing/tests/property/*.test.js kits/uk-accountancy/04-invoice-payment-chasing/tests/fault/*.test.js",
     "lint:kit01": "node scripts/lint-workflow.js --kit=01",
-    "emails:kit01": "node scripts/render-emails-01.js"
+    "lint:kit02": "node scripts/lint-workflow.js --kit=02",
+    "emails:kit01": "node scripts/render-emails-01.js",
+    "emails:kit02": "node scripts/render-emails-02.js"
   }
 }

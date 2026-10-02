@@ -212,7 +212,7 @@ console.log(`\n${kits.length} workflow${kits.length === 1 ? '' : 's'} checked: $
 
 // Kits that have been rebuilt to the tested-core standard must lint clean of
 // errors; the others are reported for information until they are rebuilt.
-const REBUILT = ['01-hmrc-deadline-reminders', '04-invoice-payment-chasing'];
+const REBUILT = ['01-hmrc-deadline-reminders', '02-mtd-vat-reminders', '04-invoice-payment-chasing'];
 
 if (only && errors > 0) process.exit(1);
 if (!only) {
