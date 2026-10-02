@@ -12,7 +12,7 @@ Want help putting these to work in your practice? See [Work with me](#work-with-
 | Kit | Description |
 | --- | --- |
 | [01-hmrc-deadline-reminders](kits/uk-accountancy/01-hmrc-deadline-reminders) | **Tested core.** Staged email reminders at 30, 14, 7 and 1 days before each deadline in your Google Sheet, with a preview before anything sends, one email per client, and no deadline rules baked in. Reminds only; never files anything. |
-| [02-mtd-vat-reminders](kits/uk-accountancy/02-mtd-vat-reminders) | Calculates MTD VAT submission deadlines and sends a pre-submission digital records checklist to clients. |
+| [02-mtd-vat-reminders](kits/uk-accountancy/02-mtd-vat-reminders) | **Tested core; rules awaiting practice confirmation (see its rules/RULES.md).** Works out each client's VAT return deadline and sends staged records-checklist emails at 21, 14, 7 and 3 days, with a preview before anything sends and one email per client. Reminds only; never files or pays anything. |
 | [03-companies-house-deadline-tracker](kits/uk-accountancy/03-companies-house-deadline-tracker) | Tracks Confirmation Statement and Annual Accounts deadlines, cross-checked against the Companies House public API. |
 | [04-invoice-payment-chasing](kits/uk-accountancy/04-invoice-payment-chasing) | **Tested core; statutory rules awaiting sign-off (see its RULES.md).** Escalating GBP invoice chase emails with a preview before anything sends, one email per client, and statutory wording only where it applies. |
 | [05-client-onboarding](kits/uk-accountancy/05-client-onboarding) | Form-triggered new client onboarding: AML/ID checklist, draft engagement letter, welcome email and HMRC 64-8 follow-up. |
@@ -42,15 +42,17 @@ Want help putting these to work in your practice? See [Work with me](#work-with-
 
 ## Status
 
-Kits 01 and 04 have been rebuilt around a tested core and are the reference for
-how the rest will follow. The other eight are as first written and have known defects.
+Kits 01, 02 and 04 have been rebuilt around a tested core and are the reference for
+how the rest will follow. The other seven are as first written and have known defects.
+Kit 02's deadline rules still need confirming against your own clients' VAT accounts
+(see its `rules/RULES.md`).
 
-| | Kits 01 and 04 | Kits 02, 03, 05-10 |
+| | Kits 01, 02 and 04 | Kits 03, 05-10 |
 |---|---|---|
 | Decision logic | One pure function, no I/O, never throws | Spread across Code nodes and expressions |
-| Tests | 157 and 91, no credentials needed | None |
+| Tests | 157, 215 and 91, no credentials needed | None |
 | `workflow.json` | Generated from the tested source; CI fails on drift | Hand-written |
-| Static checks | Passes | 35 errors, 46 warnings between them |
+| Static checks | Passes | 31 errors, 39 warnings between them |
 
 Run `npm run lint` for the current report on all ten.
 
@@ -71,8 +73,8 @@ same mistakes cannot return quietly as the remaining kits are rebuilt.
 ## Working on this repository
 
 ```
-npm test          # build check, lint, and 248 tests
-npm run build     # regenerate kits 01 and 04's workflow.json from src/core
+npm test          # build check, lint, and 463 tests
+npm run build     # regenerate kits 01, 02 and 04's workflow.json from src/core
 npm run lint      # static checks across every kit
 npm run drift     # compare a live n8n workflow against this repo
 ```

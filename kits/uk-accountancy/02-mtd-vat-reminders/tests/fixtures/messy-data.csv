@@ -1,0 +1,18 @@
+Client Name,Contact Email,VAT Period End,Submitted,VAT Scheme,HMRC Due Date,Last Checklist Sent,Checklist For Period End,Last Checklist On
+,ap@nameless.co.uk,2026-08-22,No,,,,,
+No Date Ltd,ap@nodate.co.uk,,No,,,,,
+Bad Date Ltd,ap@baddate.co.uk,31/02/2026,No,,,,,
+Bad Email Ltd,not-an-email,2026-08-22,No,,,,,
+Bad Status Ltd,ap@badstatus.co.uk,2026-08-22,Maybe,,,,,
+Annual Ltd,ap@annual.co.uk,2026-08-22,No,Annual Accounting,,,,
+Odd Scheme Ltd,ap@odd.co.uk,2026-08-22,No,Mystery,,,,
+Override Ltd,ap@override.co.uk,2026-08-22,No,,2026-09-24,,,
+Bad Override Ltd,ap@badover.co.uk,2026-08-22,No,,soon,,,
+Early Override Ltd,ap@earlyover.co.uk,2026-08-22,No,,2026-08-01,,,
+On Hold Ltd,ap@hold.co.uk,2026-08-22,On Hold,,,,,
+Not Required Ltd,ap@notreq.co.uk,2026-08-22,Not required,,,,,
+Future Done Ltd,ap@futuredone.co.uk,2027-03-31,Yes,,,,,
+Already Sent Ltd,ap@already.co.uk,2026-08-22,No,,2026-09-29,14,2026-08-22,2026-09-01
+Rolled Over Ltd,ap@rolled.co.uk,2026-08-22,No,,2026-09-22,3,2026-05-22,2026-06-19
+Past Due Ltd,ap@pastdue.co.uk,2026-05-31,No,,,,,
+Manual Ltd,ap@manual.co.uk,2026-08-22,No,,,,,
