@@ -11,7 +11,7 @@ Want help putting these to work in your practice? See [Work with me](#work-with-
 
 | Kit | Description |
 | --- | --- |
-| [01-hmrc-deadline-reminders](kits/uk-accountancy/01-hmrc-deadline-reminders) | **Tested core.** Staged email reminders at 30, 14, 7 and 1 days before each deadline in your Google Sheet, with a preview before anything sends, one email per client, and no deadline rules baked in. Reminds only; never files anything. |
+| [01-hmrc-deadline-reminders](kits/uk-accountancy/01-hmrc-deadline-reminders) | **Verified** (157 tests, plus a live n8n check of its loop and error handling). Staged email reminders at 30, 14, 7 and 1 days before each deadline in your Google Sheet, with a preview before anything sends, one email per client, and no deadline rules baked in. Reminds only; never files anything. |
 | [02-mtd-vat-reminders](kits/uk-accountancy/02-mtd-vat-reminders) | Calculates MTD VAT submission deadlines and sends a pre-submission digital records checklist to clients. |
 | [03-companies-house-deadline-tracker](kits/uk-accountancy/03-companies-house-deadline-tracker) | Tracks Confirmation Statement and Annual Accounts deadlines, cross-checked against the Companies House public API. |
 | [04-invoice-payment-chasing](kits/uk-accountancy/04-invoice-payment-chasing) | **Tested core; statutory rules awaiting sign-off (see its RULES.md).** Escalating GBP invoice chase emails with a preview before anything sends, one email per client, and statutory wording only where it applies. |
