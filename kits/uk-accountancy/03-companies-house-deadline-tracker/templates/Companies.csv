@@ -1,0 +1,4 @@
+Company Name,Company Number,Company Type,Incorporation Date,Last Accounts Made Up To,Next Accounts Period End,Last Confirmation Statement Made Up To,Confirmation Statement Due,Accounts Due,Client Contact Email,Paused
+Example Trading Ltd,01234567,Private,2019-03-14,2025-03-31,,2026-03-13,,,director@example.co.uk,
+Example Holdings plc,SC123456,Public,2018-07-02,2025-07-31,,2026-07-01,,,secretary@example.co.uk,
+New Start Ltd,14567890,Private,2025-11-03,,,,,,owner@example.co.uk,

@@ -1,7 +1,15 @@
 {
-  "name": "Companies House Deadline Tracker",
+  "name": "UK Companies House Deadline Tracker",
   "nodes": [
     {
+      "id": "trigger-daily",
+      "name": "Daily Schedule 07:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -460,
+        0
+      ],
       "parameters": {
         "rule": {
           "interval": [
@@ -12,20 +20,66 @@
             }
           ]
         }
-      },
-      "id": "c3d4e5f6-0001-4000-8000-000000000001",
-      "name": "Daily Trigger 07:00",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
-      "position": [200, 300]
+      }
     },
     {
+      "id": "build-config",
+      "name": "Build Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// GENERATED FILE. Do not edit this node in the n8n editor.\n// Source: kits/uk-accountancy/03-companies-house-deadline-tracker/src/core/\n// Rebuild with `npm run build`. CI fails if this drifts from the source.\n\n// Everything behavioural is set here, in one visible place. n8n Cloud does not\n// expose $env to Code nodes, so every value has a working default: edit it here\n// instead. Nothing in this workflow files anything with Companies House or\n// emails a client. It emails a digest to the practice.\n\nconst env = (k, fallback) => {\n  try { return $env[k] !== undefined && $env[k] !== '' ? $env[k] : fallback; }\n  catch (e) { return fallback; }\n};\n\nconst milestones = String(env('REMINDER_MILESTONES', '30,14,7,1'))\n  .split(',').map((s) => Number(s.trim()));\n\nconst weekday = String(env('ATTENTION_DIGEST_WEEKDAY', '1')).trim().toLowerCase();\n\nconst config = {\n  firmName: env('FIRM_NAME', 'Your Firm'),\n  senderEmail: env('SENDER_EMAIL', 'accounts@example.co.uk'),\n  practiceEmail: env('PRACTICE_EMAIL', ''),\n  milestones,\n  overdueRepeatDays: Number(env('OVERDUE_REPEAT_DAYS', 7)),\n  attentionDigestWeekday: weekday === 'off' ? null : Number(weekday),\n  includeClientDrafts: env('INCLUDE_CLIENT_DRAFTS', 'true') !== 'false',\n\n  // SAFETY. While this is anything other than the exact string \"false\", the\n  // digest is labelled as a preview and nothing is recorded in the Sent Log.\n  dryRun: env('DRY_RUN', 'true') !== 'false',\n  dryRunRecipient: env('DRY_RUN_RECIPIENT', env('PRACTICE_EMAIL', '')),\n};\n\n// The run date is taken in Europe/London, so a run just after midnight UTC in\n// summer is not attributed to the previous day.\nconst today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });\n\nreturn [{ json: { today, config, sheetId: env('COMPANIES_HOUSE_TRACKER_SHEET_ID', '') } }];"
+      }
+    },
+    {
+      "id": "read-sent-log",
+      "name": "Read Sent Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -20,
+        0
+      ],
       "parameters": {
         "operation": "read",
         "documentId": {
           "__rl": true,
           "mode": "id",
-          "value": "={{ $env.COMPANIES_HOUSE_TRACKER_SHEET_ID }}"
+          "value": "={{ $('Build Config').first().json.sheetId }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sent Log"
+        },
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "read-companies",
+      "name": "Read Companies",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        200,
+        0
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Build Config').first().json.sheetId }}"
         },
         "sheetName": {
           "__rl": true,
@@ -34,129 +88,732 @@
         },
         "options": {}
       },
-      "id": "c3d4e5f6-0002-4000-8000-000000000002",
-      "name": "Read Client Company List (Google Sheets)",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
-      "position": [440, 300]
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "alwaysOutputData": true,
+      "executeOnce": true
     },
     {
+      "id": "prepare",
+      "name": "Prepare Companies",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// GENERATED FILE. Do not edit this node in the n8n editor.\n// Source: kits/uk-accountancy/03-companies-house-deadline-tracker/src/core/\n// Rebuild with `npm run build`. CI fails if this drifts from the source.\n\n// ---- dates.js ----\n// Date handling. All dates are date-only ISO strings 'YYYY-MM-DD'.\n// All arithmetic is done in UTC so the host timezone can never shift a day.\n// Nothing here throws: bad input gives null.\n\nconst ISO_RE = /^(\\d{4})-(\\d{2})-(\\d{2})$/;\nconst UK_RE = /^(\\d{1,2})[\\/\\-.](\\d{1,2})[\\/\\-.](\\d{4})$/;\nconst MS_PER_DAY = 86400000;\n\n/** Build a UTC timestamp from y/m/d, or null if the calendar date is not real. */\nfunction utcFromParts(y, m, d) {\n  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return null;\n  if (y < 1000 || y > 9999 || m < 1 || m > 12 || d < 1 || d > 31) return null;\n  const ts = Date.UTC(y, m - 1, d);\n  const dt = new Date(ts);\n  // Rejects 31 February style overflow, which JS would otherwise roll forward.\n  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;\n  return ts;\n}\n\n/** Format a UTC timestamp as 'YYYY-MM-DD'. */\nfunction toISO(ts) {\n  const d = new Date(ts);\n  const p = (n) => String(n).padStart(2, '0');\n  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;\n}\n\n/**\n * Parse a spreadsheet cell or API value into 'YYYY-MM-DD'.\n * Accepts ISO strings, UK dd/mm/yyyy, JS Dates and Google Sheets serial numbers.\n * Returns null rather than guessing when the value is ambiguous or invalid.\n * Never uses `new Date(string)`, whose parsing is locale-dependent.\n */\nfunction parseSheetDate(value) {\n  if (value === null || value === undefined) return null;\n\n  if (value instanceof Date) {\n    if (Number.isNaN(value.getTime())) return null;\n    return toISO(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));\n  }\n\n  // Google Sheets serial: days since 1899-12-30.\n  if (typeof value === 'number') {\n    if (!Number.isFinite(value) || value < 1 || value > 100000) return null;\n    return toISO(Date.UTC(1899, 11, 30) + Math.floor(value) * MS_PER_DAY);\n  }\n\n  const s = String(value).trim();\n  if (s === '') return null;\n\n  const iso = ISO_RE.exec(s);\n  if (iso) {\n    const ts = utcFromParts(+iso[1], +iso[2], +iso[3]);\n    return ts === null ? null : toISO(ts);\n  }\n\n  const uk = UK_RE.exec(s);\n  if (uk) {\n    const ts = utcFromParts(+uk[3], +uk[2], +uk[1]);\n    return ts === null ? null : toISO(ts);\n  }\n\n  return null;\n}\n\n/** Timestamp for an ISO date string, or null. */\nfunction tsOf(isoDate) {\n  const m = ISO_RE.exec(String(isoDate ?? '').trim());\n  if (!m) return null;\n  return utcFromParts(+m[1], +m[2], +m[3]);\n}\n\n/** Whole days from `from` to `to`. Positive when `to` is later. */\nfunction daysBetween(fromISO, toISOdate) {\n  const a = tsOf(fromISO);\n  const b = tsOf(toISOdate);\n  if (a === null || b === null) return null;\n  return Math.round((b - a) / MS_PER_DAY);\n}\n\nfunction addDays(isoDate, n) {\n  const ts = tsOf(isoDate);\n  if (ts === null || !Number.isFinite(n)) return null;\n  return toISO(ts + n * MS_PER_DAY);\n}\n\n/** 0 = Sunday .. 6 = Saturday */\nfunction dayOfWeek(isoDate) {\n  const ts = tsOf(isoDate);\n  return ts === null ? null : new Date(ts).getUTCDay();\n}\n\nfunction daysInMonth(y, m) {\n  return new Date(Date.UTC(y, m, 0)).getUTCDate();\n}\n\nfunction isLastDayOfMonth(isoDate) {\n  const ts = tsOf(isoDate);\n  if (ts === null) return false;\n  const d = new Date(ts);\n  return d.getUTCDate() === daysInMonth(d.getUTCFullYear(), d.getUTCMonth() + 1);\n}\n\nfunction lastDayOfMonthOf(isoDate) {\n  const ts = tsOf(isoDate);\n  if (ts === null) return null;\n  const d = new Date(ts);\n  const y = d.getUTCFullYear();\n  const m = d.getUTCMonth() + 1;\n  return toISO(Date.UTC(y, m - 1, daysInMonth(y, m)));\n}\n\n/**\n * Add whole calendar months the way Companies House describes them: a period of\n * months after a date ends on the corresponding date in the appropriate month\n * (4 April + 9 months is 4 January). When `monthEndSticky` is true, a date that\n * is the last day of its month ends on the last day of the appropriate month\n * (30 April + 9 months is 31 January). The guidance states that second rule for\n * accounting reference dates only, so callers pass true for those and nothing else.\n *\n * Returns { date, clamped }. `clamped` is true when the corresponding date does\n * not exist in the target month (31 May + 9 months) and the last day of that\n * month was used instead. That case is not covered by the guidance, so callers\n * flag it for a person to confirm. Returns { date: null, clamped: false } for\n * bad input.\n */\nfunction addMonths(isoDate, months, monthEndSticky = false) {\n  const ts = tsOf(isoDate);\n  if (ts === null || !Number.isInteger(months)) return { date: null, clamped: false };\n  const src = new Date(ts);\n  const y = src.getUTCFullYear();\n  const m0 = src.getUTCMonth();\n  const d = src.getUTCDate();\n  const total = y * 12 + m0 + months;\n  const ty = Math.floor(total / 12);\n  const tm = (total % 12 + 12) % 12 + 1;\n  const dim = daysInMonth(ty, tm);\n  if (ty < 1000 || ty > 9999) return { date: null, clamped: false };\n  if (monthEndSticky === true && isLastDayOfMonth(isoDate)) {\n    return { date: toISO(Date.UTC(ty, tm - 1, dim)), clamped: false };\n  }\n  if (d > dim) return { date: toISO(Date.UTC(ty, tm - 1, dim)), clamped: true };\n  return { date: toISO(Date.UTC(ty, tm - 1, d)), clamped: false };\n}\n\n/** 'Wednesday 14 October 2026', how a UK practice reads a date. */\nfunction formatUKDate(isoDate) {\n  const ts = tsOf(isoDate);\n  if (ts === null) return String(isoDate ?? '');\n  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];\n  const months = ['January', 'February', 'March', 'April', 'May', 'June',\n    'July', 'August', 'September', 'October', 'November', 'December'];\n  const d = new Date(ts);\n  return `${days[d.getUTCDay()]} ${d.getUTCDate()} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}`;\n}\n\n// ---- companies.js ----\n// Reading a client row and a Companies House response into clean values.\n// Nothing here throws. Anything unusable is returned as null with a reason,\n// so the planner can flag it instead of guessing.\n\nconst EMAIL_RE = /^[^\\s@]+@[^\\s@.]+(\\.[^\\s@.]+)+$/;\nconst COMPANY_NUMBER_RE = /^[A-Z0-9]{2}\\d{6}$/;\n\nfunction isValidEmail(value) {\n  const s = String(value ?? '').trim();\n  return s.length > 0 && s.length <= 254 && EMAIL_RE.test(s);\n}\n\n/**\n * Companies House numbers are eight characters: two letters or digits then six\n * digits (SC123456, 01234567). A spreadsheet often drops leading zeros from an\n * all-digit number, so those are padded back to eight and reported as padded.\n */\nfunction normaliseCompanyNumber(value) {\n  const raw = String(value ?? '').replace(/\\s+/g, '').toUpperCase();\n  if (raw === '') return { number: '', valid: false, padded: false, reason: 'no company number' };\n  if (/^\\d{1,7}$/.test(raw)) {\n    return { number: raw.padStart(8, '0'), valid: true, padded: true, reason: null };\n  }\n  if (COMPANY_NUMBER_RE.test(raw)) return { number: raw, valid: true, padded: false, reason: null };\n  return { number: raw, valid: false, padded: false, reason: `\"${raw}\" is not a Companies House number` };\n}\n\n/** 'private' | 'public' | null, using the synonym lists held in the rules file. */\nfunction normaliseCompanyType(value, rules) {\n  const s = String(value ?? '').trim().toLowerCase().replace(/\\s+/g, ' ');\n  if (s === '') return null;\n  const lists = (rules && rules.companyType) || {};\n  if (Array.isArray(lists.private) && lists.private.includes(s)) return 'private';\n  if (Array.isArray(lists.public) && lists.public.includes(s)) return 'public';\n  return null;\n}\n\n/** Companies House API company type, narrower than the sheet: unknown types are not guessed. */\nfunction typeFromApi(apiType) {\n  const s = String(apiType ?? '').trim().toLowerCase();\n  if (s === 'ltd') return 'private';\n  if (s === 'plc') return 'public';\n  return null;\n}\n\nfunction truthy(value) {\n  const s = String(value ?? '').trim().toLowerCase();\n  return s === 'yes' || s === 'y' || s === 'true' || s === '1' || s === 'paused';\n}\n\nconst COLUMNS = {\n  name: 'Company Name',\n  number: 'Company Number',\n  type: 'Company Type',\n  incorporated: 'Incorporation Date',\n  lastAccounts: 'Last Accounts Made Up To',\n  periodEnd: 'Next Accounts Period End',\n  lastCs: 'Last Confirmation Statement Made Up To',\n  csDue: 'Confirmation Statement Due',\n  accountsDue: 'Accounts Due',\n  email: 'Client Contact Email',\n  paused: 'Paused',\n};\n\nconst COMPANY_COLUMNS = COLUMNS;\n\nfunction isEmptyRow(row) {\n  if (!row || typeof row !== 'object') return true;\n  return Object.entries(row).every(([k, v]) =>\n    k === 'row_number' || k.startsWith('_') || String(v ?? '').trim() === '');\n}\n\n/**\n * One sheet row as typed values. `problems` lists every date cell that has text\n * in it but cannot be read, because a date that silently becomes \"missing\" is\n * how a deadline gets lost.\n */\nfunction readCompanyRow(row, rules) {\n  const r = row && typeof row === 'object' ? row : {};\n  const problems = [];\n  const date = (key) => {\n    const raw = r[COLUMNS[key]];\n    if (raw === undefined || raw === null || String(raw).trim() === '') return null;\n    const parsed = parseSheetDate(raw);\n    if (parsed === null) problems.push(`${COLUMNS[key]} \"${String(raw).trim()}\" is not a readable date`);\n    return parsed;\n  };\n  const num = normaliseCompanyNumber(r._companyNumber !== undefined ? r._companyNumber : r[COLUMNS.number]);\n  const typeRaw = String(r[COLUMNS.type] ?? '').trim();\n  const type = normaliseCompanyType(typeRaw, rules);\n  if (typeRaw !== '' && type === null) problems.push(`Company Type \"${typeRaw}\" is not recognised (use Private or Public)`);\n\n  return {\n    rowNumber: Number.isFinite(r.row_number) ? r.row_number : null,\n    name: String(r[COLUMNS.name] ?? '').trim(),\n    number: num,\n    type,\n    incorporated: date('incorporated'),\n    lastAccounts: date('lastAccounts'),\n    periodEnd: date('periodEnd'),\n    lastCs: date('lastCs'),\n    csDueOverride: date('csDue'),\n    accountsDueOverride: date('accountsDue'),\n    email: String(r[COLUMNS.email] ?? '').trim(),\n    paused: truthy(r[COLUMNS.paused]),\n    problems,\n  };\n}\n\nfunction apiDate(v) {\n  const s = parseSheetDate(typeof v === 'string' ? v : null);\n  return s;\n}\n\n/**\n * The parts of a Companies House company profile this kit uses.\n * `ok` is false for a failed lookup (an error object, a 404 body, nothing at\n * all), in which case the sheet is the only source and the planner says so.\n */\nfunction readApiProfile(api) {\n  const none = { ok: false, reason: 'no response from Companies House' };\n  if (!api || typeof api !== 'object') return none;\n  if (api.error || api.errors || api.message) {\n    const why = api.error?.message || api.message || (typeof api.error === 'string' ? api.error : 'lookup failed');\n    return { ok: false, reason: `Companies House lookup failed: ${String(why).slice(0, 120)}` };\n  }\n  if (typeof api.company_number !== 'string' && typeof api.company_status !== 'string') {\n    return { ok: false, reason: 'Companies House returned an unexpected response' };\n  }\n  const acc = api.accounts && typeof api.accounts === 'object' ? api.accounts : {};\n  const cs = api.confirmation_statement && typeof api.confirmation_statement === 'object'\n    ? api.confirmation_statement : {};\n  return {\n    ok: true,\n    reason: null,\n    number: typeof api.company_number === 'string' ? api.company_number.toUpperCase() : '',\n    name: typeof api.company_name === 'string' ? api.company_name : '',\n    status: typeof api.company_status === 'string' ? api.company_status.toLowerCase() : '',\n    type: typeFromApi(api.type),\n    rawType: typeof api.type === 'string' ? api.type : '',\n    incorporated: apiDate(api.date_of_creation),\n    accounts: {\n      nextDue: apiDate(acc.next_due),\n      nextMadeUpTo: apiDate(acc.next_made_up_to),\n      lastMadeUpTo: apiDate(acc.last_accounts && acc.last_accounts.made_up_to),\n      overdue: acc.overdue === true,\n    },\n    confirmationStatement: {\n      nextDue: apiDate(cs.next_due),\n      nextMadeUpTo: apiDate(cs.next_made_up_to),\n      lastMadeUpTo: apiDate(cs.last_made_up_to),\n      overdue: cs.overdue === true,\n    },\n  };\n}\n\n// ---- n8n entry point ----\n// Adds a cleaned company number to each row so the lookup URL is built from the\n// same normalisation the planner uses. Every row is kept, including bad ones,\n// so the planner can report them.\n// Paused and unusable rows skip the lookup.\nreturn $input.all().map((item, index) => {\n  const num = normaliseCompanyNumber(item.json['Company Number']);\n  const paused = readCompanyRow(item.json, null).paused;\n  return {\n    json: { ...item.json, _companyNumber: num.number, _needsLookup: num.valid && !paused },\n    pairedItem: { item: index },\n  };\n});"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "loop",
+      "name": "Per Company",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        640,
+        0
+      ],
       "parameters": {
         "batchSize": 1,
         "options": {}
-      },
-      "id": "c3d4e5f6-0003-4000-8000-000000000003",
-      "name": "Split In Batches (per company)",
-      "type": "n8n-nodes-base.splitInBatches",
-      "typeVersion": 3,
-      "position": [680, 300]
+      }
     },
     {
+      "id": "if-lookup",
+      "name": "Needs Lookup",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "l1",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json._needsLookup }}",
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "skip-lookup",
+      "name": "Skip Lookup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// GENERATED FILE. Do not edit this node in the n8n editor.\n// Source: kits/uk-accountancy/03-companies-house-deadline-tracker/src/core/\n// Rebuild with `npm run build`. CI fails if this drifts from the source.\n\n// Paused or unusable row: no request is made. The planner reports the row.\nreturn { json: { row: $json, api: null } };"
+      }
+    },
+    {
+      "id": "rate-wait",
+      "name": "Rate Limit Pause",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        240
+      ],
+      "webhookId": "k03-rate-pause",
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 0.6,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "lookup",
+      "name": "Companies House Lookup",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        240
+      ],
       "parameters": {
         "method": "GET",
-        "url": "=https://api.company-information.service.gov.uk/company/{{ $json['Company Number'] }}",
+        "url": "=https://api.company-information.service.gov.uk/company/{{ encodeURIComponent($json._companyNumber || 'invalid') }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpBasicAuth",
         "options": {
           "timeout": 10000
         }
       },
-      "id": "c3d4e5f6-0004-4000-8000-000000000004",
-      "name": "Verify Company (Companies House API)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [920, 220]
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
     },
     {
-      "parameters": {
-        "jsCode": "// Merge live Companies House data (if available) back onto the sheet row,\n// then compute days remaining for Confirmation Statement and Accounts.\nconst apiResults = $input.all();\nconst sheetItem = $('Split In Batches (per company)').item;\nconst row = sheetItem.json;\nconst api = apiResults[0] ? apiResults[0].json : {};\n\nconst today = new Date();\ntoday.setHours(0,0,0,0);\nconst msPerDay = 1000 * 60 * 60 * 24;\n\nfunction daysUntil(dateStr) {\n  if (!dateStr) return null;\n  const d = new Date(dateStr);\n  if (isNaN(d.getTime())) return null;\n  d.setHours(0,0,0,0);\n  return Math.round((d - today) / msPerDay);\n}\n\n// Prefer live API dates when available, else fall back to sheet values\nconst csDueDate = (api.confirmation_statement && api.confirmation_statement.next_due) || row['Confirmation Statement Due'];\nconst accountsDueDate = (api.accounts && api.accounts.next_due) || row['Accounts Due'];\n\nreturn [{\n  json: {\n    ...row,\n    companyStatus: api.company_status || 'unknown',\n    confirmationStatementDue: csDueDate,\n    confirmationStatementDaysRemaining: daysUntil(csDueDate),\n    accountsDue: accountsDueDate,\n    accountsDaysRemaining: daysUntil(accountsDueDate)\n  }\n}];"
-      },
-      "id": "c3d4e5f6-0005-4000-8000-000000000005",
-      "name": "Merge & Compute Days Remaining",
+      "id": "collect",
+      "name": "Collect Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1160, 300]
+      "position": [
+        1320,
+        240
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// GENERATED FILE. Do not edit this node in the n8n editor.\n// Source: kits/uk-accountancy/03-companies-house-deadline-tracker/src/core/\n// Rebuild with `npm run build`. CI fails if this drifts from the source.\n\n// Runs once per company. Pairs the sheet row with whatever Companies House\n// returned, or with the error object if the lookup failed, so the planner can\n// say so instead of the run stopping.\n// No fallback: if n8n cannot pair this response with its company the run fails,\n// rather than attaching one company's data to another. The planner also checks\n// that the response's company number matches the row's.\nconst row = $('Per Company').item.json;\nreturn { json: { row, api: $json } };"
+      }
     },
     {
+      "id": "plan",
+      "name": "Plan Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -120
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// GENERATED FILE. Do not edit this node in the n8n editor.\n// Source: kits/uk-accountancy/03-companies-house-deadline-tracker/src/core/\n// Rebuild with `npm run build`. CI fails if this drifts from the source.\n\n// ---- dates.js ----\n// Date handling. All dates are date-only ISO strings 'YYYY-MM-DD'.\n// All arithmetic is done in UTC so the host timezone can never shift a day.\n// Nothing here throws: bad input gives null.\n\nconst ISO_RE = /^(\\d{4})-(\\d{2})-(\\d{2})$/;\nconst UK_RE = /^(\\d{1,2})[\\/\\-.](\\d{1,2})[\\/\\-.](\\d{4})$/;\nconst MS_PER_DAY = 86400000;\n\n/** Build a UTC timestamp from y/m/d, or null if the calendar date is not real. */\nfunction utcFromParts(y, m, d) {\n  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return null;\n  if (y < 1000 || y > 9999 || m < 1 || m > 12 || d < 1 || d > 31) return null;\n  const ts = Date.UTC(y, m - 1, d);\n  const dt = new Date(ts);\n  // Rejects 31 February style overflow, which JS would otherwise roll forward.\n  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;\n  return ts;\n}\n\n/** Format a UTC timestamp as 'YYYY-MM-DD'. */\nfunction toISO(ts) {\n  const d = new Date(ts);\n  const p = (n) => String(n).padStart(2, '0');\n  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;\n}\n\n/**\n * Parse a spreadsheet cell or API value into 'YYYY-MM-DD'.\n * Accepts ISO strings, UK dd/mm/yyyy, JS Dates and Google Sheets serial numbers.\n * Returns null rather than guessing when the value is ambiguous or invalid.\n * Never uses `new Date(string)`, whose parsing is locale-dependent.\n */\nfunction parseSheetDate(value) {\n  if (value === null || value === undefined) return null;\n\n  if (value instanceof Date) {\n    if (Number.isNaN(value.getTime())) return null;\n    return toISO(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));\n  }\n\n  // Google Sheets serial: days since 1899-12-30.\n  if (typeof value === 'number') {\n    if (!Number.isFinite(value) || value < 1 || value > 100000) return null;\n    return toISO(Date.UTC(1899, 11, 30) + Math.floor(value) * MS_PER_DAY);\n  }\n\n  const s = String(value).trim();\n  if (s === '') return null;\n\n  const iso = ISO_RE.exec(s);\n  if (iso) {\n    const ts = utcFromParts(+iso[1], +iso[2], +iso[3]);\n    return ts === null ? null : toISO(ts);\n  }\n\n  const uk = UK_RE.exec(s);\n  if (uk) {\n    const ts = utcFromParts(+uk[3], +uk[2], +uk[1]);\n    return ts === null ? null : toISO(ts);\n  }\n\n  return null;\n}\n\n/** Timestamp for an ISO date string, or null. */\nfunction tsOf(isoDate) {\n  const m = ISO_RE.exec(String(isoDate ?? '').trim());\n  if (!m) return null;\n  return utcFromParts(+m[1], +m[2], +m[3]);\n}\n\n/** Whole days from `from` to `to`. Positive when `to` is later. */\nfunction daysBetween(fromISO, toISOdate) {\n  const a = tsOf(fromISO);\n  const b = tsOf(toISOdate);\n  if (a === null || b === null) return null;\n  return Math.round((b - a) / MS_PER_DAY);\n}\n\nfunction addDays(isoDate, n) {\n  const ts = tsOf(isoDate);\n  if (ts === null || !Number.isFinite(n)) return null;\n  return toISO(ts + n * MS_PER_DAY);\n}\n\n/** 0 = Sunday .. 6 = Saturday */\nfunction dayOfWeek(isoDate) {\n  const ts = tsOf(isoDate);\n  return ts === null ? null : new Date(ts).getUTCDay();\n}\n\nfunction daysInMonth(y, m) {\n  return new Date(Date.UTC(y, m, 0)).getUTCDate();\n}\n\nfunction isLastDayOfMonth(isoDate) {\n  const ts = tsOf(isoDate);\n  if (ts === null) return false;\n  const d = new Date(ts);\n  return d.getUTCDate() === daysInMonth(d.getUTCFullYear(), d.getUTCMonth() + 1);\n}\n\nfunction lastDayOfMonthOf(isoDate) {\n  const ts = tsOf(isoDate);\n  if (ts === null) return null;\n  const d = new Date(ts);\n  const y = d.getUTCFullYear();\n  const m = d.getUTCMonth() + 1;\n  return toISO(Date.UTC(y, m - 1, daysInMonth(y, m)));\n}\n\n/**\n * Add whole calendar months the way Companies House describes them: a period of\n * months after a date ends on the corresponding date in the appropriate month\n * (4 April + 9 months is 4 January). When `monthEndSticky` is true, a date that\n * is the last day of its month ends on the last day of the appropriate month\n * (30 April + 9 months is 31 January). The guidance states that second rule for\n * accounting reference dates only, so callers pass true for those and nothing else.\n *\n * Returns { date, clamped }. `clamped` is true when the corresponding date does\n * not exist in the target month (31 May + 9 months) and the last day of that\n * month was used instead. That case is not covered by the guidance, so callers\n * flag it for a person to confirm. Returns { date: null, clamped: false } for\n * bad input.\n */\nfunction addMonths(isoDate, months, monthEndSticky = false) {\n  const ts = tsOf(isoDate);\n  if (ts === null || !Number.isInteger(months)) return { date: null, clamped: false };\n  const src = new Date(ts);\n  const y = src.getUTCFullYear();\n  const m0 = src.getUTCMonth();\n  const d = src.getUTCDate();\n  const total = y * 12 + m0 + months;\n  const ty = Math.floor(total / 12);\n  const tm = (total % 12 + 12) % 12 + 1;\n  const dim = daysInMonth(ty, tm);\n  if (ty < 1000 || ty > 9999) return { date: null, clamped: false };\n  if (monthEndSticky === true && isLastDayOfMonth(isoDate)) {\n    return { date: toISO(Date.UTC(ty, tm - 1, dim)), clamped: false };\n  }\n  if (d > dim) return { date: toISO(Date.UTC(ty, tm - 1, dim)), clamped: true };\n  return { date: toISO(Date.UTC(ty, tm - 1, d)), clamped: false };\n}\n\n/** 'Wednesday 14 October 2026', how a UK practice reads a date. */\nfunction formatUKDate(isoDate) {\n  const ts = tsOf(isoDate);\n  if (ts === null) return String(isoDate ?? '');\n  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];\n  const months = ['January', 'February', 'March', 'April', 'May', 'June',\n    'July', 'August', 'September', 'October', 'November', 'December'];\n  const d = new Date(ts);\n  return `${days[d.getUTCDay()]} ${d.getUTCDate()} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}`;\n}\n\n// ---- rules.js ----\n// Interpreting the rules file and the reminder calendar. The numbers themselves\n// (months, days, status lists) live in ../../rules/deadline-rules.json and are\n// cited in ../../rules/RULES.md. Nothing here throws.\n\n/** Returns a list of problems with a rules object. Empty means usable. */\nfunction rulesProblems(rules) {\n  const out = [];\n  const isNum = (v) => Number.isInteger(v) && v >= 0;\n  if (!rules || typeof rules !== 'object') return ['rules are missing'];\n  const a = rules.accounts || {};\n  const f = a.firstAccounts || {};\n  const c = rules.confirmationStatement || {};\n  if (!isNum(a.privateMonthsAfterPeriodEnd)) out.push('accounts.privateMonthsAfterPeriodEnd');\n  if (!isNum(a.publicMonthsAfterPeriodEnd)) out.push('accounts.publicMonthsAfterPeriodEnd');\n  if (!isNum(a.standardPeriodMonths)) out.push('accounts.standardPeriodMonths');\n  if (!isNum(f.privateMonthsAfterIncorporation)) out.push('accounts.firstAccounts.privateMonthsAfterIncorporation');\n  if (!isNum(f.publicMonthsAfterIncorporation)) out.push('accounts.firstAccounts.publicMonthsAfterIncorporation');\n  if (!isNum(f.minimumMonthsAfterPeriodEnd)) out.push('accounts.firstAccounts.minimumMonthsAfterPeriodEnd');\n  if (!isNum(c.reviewPeriodMonths)) out.push('confirmationStatement.reviewPeriodMonths');\n  if (!isNum(c.filingDaysAfterReviewPeriodEnd)) out.push('confirmationStatement.filingDaysAfterReviewPeriodEnd');\n  if (!rules.companyStatus || !Array.isArray(rules.companyStatus.remindFor)\n    || !Array.isArray(rules.companyStatus.suppress)) out.push('companyStatus');\n  return out.map((p) => `rules file is missing or invalid: ${p}`);\n}\n\n/**\n * Which reminder band a deadline is in.\n * Milestones are days before the deadline, e.g. [30, 14, 7, 1]. The band is the\n * smallest milestone that is still at or above the days remaining, so a run that\n * was missed (n8n down, a weekend off) still produces the reminder the next time\n * it runs, instead of skipping a milestone for ever. Returns null when the\n * deadline is further away than the first milestone.\n *\n * A deadline already passed is `overdue-N`, where N steps up every\n * `overdueRepeatDays` so a late filing keeps surfacing without a daily flood.\n */\nfunction bandFor(daysRemaining, milestones, overdueRepeatDays) {\n  if (!Number.isFinite(daysRemaining) || !Array.isArray(milestones)) return null;\n  if (daysRemaining < 0) {\n    const repeat = Number.isInteger(overdueRepeatDays) && overdueRepeatDays > 0 ? overdueRepeatDays : 7;\n    const n = Math.floor((-daysRemaining - 1) / repeat) + 1;\n    return { band: `overdue-${n}`, overdue: true };\n  }\n  const ascending = [...milestones].sort((x, y) => x - y);\n  const m = ascending.find((x) => x >= daysRemaining);\n  if (m === undefined) return null;\n  return { band: String(m), overdue: false };\n}\n\n/** 'remind' | 'suppress' | 'review' for a Companies House company status. */\nfunction statusAction(status, rules) {\n  const s = String(status ?? '').trim().toLowerCase();\n  const st = (rules && rules.companyStatus) || {};\n  if ((st.remindFor || []).includes(s)) return 'remind';\n  if ((st.suppress || []).includes(s)) return 'suppress';\n  return 'review';\n}\n\nconst KIND_LABEL = {\n  accounts: 'Annual accounts',\n  confirmationStatement: 'Confirmation statement',\n};\n\n// ---- companies.js ----\n// Reading a client row and a Companies House response into clean values.\n// Nothing here throws. Anything unusable is returned as null with a reason,\n// so the planner can flag it instead of guessing.\n\nconst EMAIL_RE = /^[^\\s@]+@[^\\s@.]+(\\.[^\\s@.]+)+$/;\nconst COMPANY_NUMBER_RE = /^[A-Z0-9]{2}\\d{6}$/;\n\nfunction isValidEmail(value) {\n  const s = String(value ?? '').trim();\n  return s.length > 0 && s.length <= 254 && EMAIL_RE.test(s);\n}\n\n/**\n * Companies House numbers are eight characters: two letters or digits then six\n * digits (SC123456, 01234567). A spreadsheet often drops leading zeros from an\n * all-digit number, so those are padded back to eight and reported as padded.\n */\nfunction normaliseCompanyNumber(value) {\n  const raw = String(value ?? '').replace(/\\s+/g, '').toUpperCase();\n  if (raw === '') return { number: '', valid: false, padded: false, reason: 'no company number' };\n  if (/^\\d{1,7}$/.test(raw)) {\n    return { number: raw.padStart(8, '0'), valid: true, padded: true, reason: null };\n  }\n  if (COMPANY_NUMBER_RE.test(raw)) return { number: raw, valid: true, padded: false, reason: null };\n  return { number: raw, valid: false, padded: false, reason: `\"${raw}\" is not a Companies House number` };\n}\n\n/** 'private' | 'public' | null, using the synonym lists held in the rules file. */\nfunction normaliseCompanyType(value, rules) {\n  const s = String(value ?? '').trim().toLowerCase().replace(/\\s+/g, ' ');\n  if (s === '') return null;\n  const lists = (rules && rules.companyType) || {};\n  if (Array.isArray(lists.private) && lists.private.includes(s)) return 'private';\n  if (Array.isArray(lists.public) && lists.public.includes(s)) return 'public';\n  return null;\n}\n\n/** Companies House API company type, narrower than the sheet: unknown types are not guessed. */\nfunction typeFromApi(apiType) {\n  const s = String(apiType ?? '').trim().toLowerCase();\n  if (s === 'ltd') return 'private';\n  if (s === 'plc') return 'public';\n  return null;\n}\n\nfunction truthy(value) {\n  const s = String(value ?? '').trim().toLowerCase();\n  return s === 'yes' || s === 'y' || s === 'true' || s === '1' || s === 'paused';\n}\n\nconst COLUMNS = {\n  name: 'Company Name',\n  number: 'Company Number',\n  type: 'Company Type',\n  incorporated: 'Incorporation Date',\n  lastAccounts: 'Last Accounts Made Up To',\n  periodEnd: 'Next Accounts Period End',\n  lastCs: 'Last Confirmation Statement Made Up To',\n  csDue: 'Confirmation Statement Due',\n  accountsDue: 'Accounts Due',\n  email: 'Client Contact Email',\n  paused: 'Paused',\n};\n\nconst COMPANY_COLUMNS = COLUMNS;\n\nfunction isEmptyRow(row) {\n  if (!row || typeof row !== 'object') return true;\n  return Object.entries(row).every(([k, v]) =>\n    k === 'row_number' || k.startsWith('_') || String(v ?? '').trim() === '');\n}\n\n/**\n * One sheet row as typed values. `problems` lists every date cell that has text\n * in it but cannot be read, because a date that silently becomes \"missing\" is\n * how a deadline gets lost.\n */\nfunction readCompanyRow(row, rules) {\n  const r = row && typeof row === 'object' ? row : {};\n  const problems = [];\n  const date = (key) => {\n    const raw = r[COLUMNS[key]];\n    if (raw === undefined || raw === null || String(raw).trim() === '') return null;\n    const parsed = parseSheetDate(raw);\n    if (parsed === null) problems.push(`${COLUMNS[key]} \"${String(raw).trim()}\" is not a readable date`);\n    return parsed;\n  };\n  const num = normaliseCompanyNumber(r._companyNumber !== undefined ? r._companyNumber : r[COLUMNS.number]);\n  const typeRaw = String(r[COLUMNS.type] ?? '').trim();\n  const type = normaliseCompanyType(typeRaw, rules);\n  if (typeRaw !== '' && type === null) problems.push(`Company Type \"${typeRaw}\" is not recognised (use Private or Public)`);\n\n  return {\n    rowNumber: Number.isFinite(r.row_number) ? r.row_number : null,\n    name: String(r[COLUMNS.name] ?? '').trim(),\n    number: num,\n    type,\n    incorporated: date('incorporated'),\n    lastAccounts: date('lastAccounts'),\n    periodEnd: date('periodEnd'),\n    lastCs: date('lastCs'),\n    csDueOverride: date('csDue'),\n    accountsDueOverride: date('accountsDue'),\n    email: String(r[COLUMNS.email] ?? '').trim(),\n    paused: truthy(r[COLUMNS.paused]),\n    problems,\n  };\n}\n\nfunction apiDate(v) {\n  const s = parseSheetDate(typeof v === 'string' ? v : null);\n  return s;\n}\n\n/**\n * The parts of a Companies House company profile this kit uses.\n * `ok` is false for a failed lookup (an error object, a 404 body, nothing at\n * all), in which case the sheet is the only source and the planner says so.\n */\nfunction readApiProfile(api) {\n  const none = { ok: false, reason: 'no response from Companies House' };\n  if (!api || typeof api !== 'object') return none;\n  if (api.error || api.errors || api.message) {\n    const why = api.error?.message || api.message || (typeof api.error === 'string' ? api.error : 'lookup failed');\n    return { ok: false, reason: `Companies House lookup failed: ${String(why).slice(0, 120)}` };\n  }\n  if (typeof api.company_number !== 'string' && typeof api.company_status !== 'string') {\n    return { ok: false, reason: 'Companies House returned an unexpected response' };\n  }\n  const acc = api.accounts && typeof api.accounts === 'object' ? api.accounts : {};\n  const cs = api.confirmation_statement && typeof api.confirmation_statement === 'object'\n    ? api.confirmation_statement : {};\n  return {\n    ok: true,\n    reason: null,\n    number: typeof api.company_number === 'string' ? api.company_number.toUpperCase() : '',\n    name: typeof api.company_name === 'string' ? api.company_name : '',\n    status: typeof api.company_status === 'string' ? api.company_status.toLowerCase() : '',\n    type: typeFromApi(api.type),\n    rawType: typeof api.type === 'string' ? api.type : '',\n    incorporated: apiDate(api.date_of_creation),\n    accounts: {\n      nextDue: apiDate(acc.next_due),\n      nextMadeUpTo: apiDate(acc.next_made_up_to),\n      lastMadeUpTo: apiDate(acc.last_accounts && acc.last_accounts.made_up_to),\n      overdue: acc.overdue === true,\n    },\n    confirmationStatement: {\n      nextDue: apiDate(cs.next_due),\n      nextMadeUpTo: apiDate(cs.next_made_up_to),\n      lastMadeUpTo: apiDate(cs.last_made_up_to),\n      overdue: cs.overdue === true,\n    },\n  };\n}\n\n// ---- deadlines.js ----\n// The deadline arithmetic. Every rule it applies is a value in rules/deadline-rules.json\n// and a row in rules/RULES.md. It returns a result for every input, including bad\n// input: a deadline it cannot work out comes back with dueDate null and the reason\n// in `flags`, never an exception and never a guess.\n\nconst SHEET_ONLY_FLAG = 'Worked out from the sheet, not taken from Companies House. Needs human confirmation against the register.';\n\nfunction finish(kind, dueDate, source, periodEnd, flags, notes, overdueAtRegister) {\n  return {\n    kind,\n    dueDate: dueDate || null,\n    source: dueDate ? source : 'none',\n    periodEnd: periodEnd || null,\n    flags,\n    notes,\n    overdueAtRegister: overdueAtRegister === true,\n    discrepancy: false,\n    needsConfirmation: flags.length > 0,\n  };\n}\n\n/** Pick between the Companies House date, the date typed into the sheet, and the calculation. */\nfunction choose(kind, apiDue, sheetDue, calc, periodEnd, overdueAtRegister) {\n  const flags = [];\n  const notes = [];\n  if (apiDue && sheetDue && apiDue !== sheetDue) {\n    flags.push(`Companies House says ${apiDue} but the sheet says ${sheetDue}. The earlier date is used. Needs human confirmation.`);\n    const result = finish(kind, apiDue < sheetDue ? apiDue : sheetDue, 'companies-house', periodEnd, flags, notes, overdueAtRegister);\n    result.discrepancy = true;\n    return result;\n  }\n  if (apiDue) return finish(kind, apiDue, 'companies-house', periodEnd, flags, notes, overdueAtRegister);\n  if (sheetDue) {\n    flags.push('Date typed into the sheet and not cross-checked with Companies House. Needs human confirmation.');\n    return finish(kind, sheetDue, 'sheet', periodEnd, flags, notes, overdueAtRegister);\n  }\n  if (calc && calc.date) {\n    flags.push(SHEET_ONLY_FLAG, ...calc.flags);\n    notes.push(...calc.notes);\n    return finish(kind, calc.date, 'calculated', calc.periodEnd || periodEnd, flags, notes, overdueAtRegister);\n  }\n  flags.push(...((calc && calc.flags) || ['Not enough information to work out this deadline. Needs human confirmation.']));\n  return finish(kind, null, 'none', periodEnd, flags, notes, overdueAtRegister);\n}\n\n/**\n * Accounts deadline.\n * @param {object} company  readCompanyRow() output\n * @param {object} profile  readApiProfile() output (ok false when the lookup failed)\n * @param {string|null} type 'private' | 'public' | null, already resolved by the planner\n * @param {object} rules    rules/deadline-rules.json\n */\nfunction accountsDeadline(company, profile, type, rules) {\n  const acc = (profile.ok && profile.accounts) || {};\n  const r = rules.accounts;\n  const fa = r.firstAccounts;\n  const flags = [];\n  const notes = [];\n  let calc = null;\n\n  const lastAccounts = company.lastAccounts || acc.lastMadeUpTo || null;\n  const incorporated = company.incorporated || (profile.ok ? profile.incorporated : null) || null;\n  const needCalc = !acc.nextDue && !company.accountsDueOverride;\n\n  if (needCalc) {\n    let periodEnd = acc.nextMadeUpTo || company.periodEnd || null;\n    if (!periodEnd && lastAccounts) {\n      const next = addMonths(lastAccounts, r.standardPeriodMonths, true);\n      periodEnd = next.date;\n      flags.push(`Next accounting period end assumed to be ${r.standardPeriodMonths} months after the last accounts (${lastAccounts}). A changed accounting reference date would make this wrong. Needs human confirmation.`);\n    }\n    const first = !lastAccounts;\n    if (!periodEnd && first && incorporated) {\n      // The first accounting reference date is the last day of the month in which\n      // the first anniversary of incorporation falls.\n      const anniversary = addMonths(incorporated, 12, false);\n      if (anniversary.clamped) flags.push('Incorporated on 29 February: the first anniversary is taken as 28 February. Needs human confirmation.');\n      periodEnd = anniversary.date ? lastDayOfMonthOf(anniversary.date) : null;\n      notes.push('First accounting reference date taken as the last day of the month of the first anniversary of incorporation.');\n    }\n\n    if (!type) {\n      flags.push('Company type (private or public) is not known, so the accounts period cannot be applied. Needs human confirmation.');\n    } else if (!periodEnd) {\n      flags.push('No accounting period end, last accounts date or incorporation date to work from. Needs human confirmation.');\n    } else if (first && !incorporated) {\n      flags.push('First accounts: the incorporation date is needed to apply the first-accounts rule. Needs human confirmation.');\n    } else {\n      const normalMonths = type === 'public' ? r.publicMonthsAfterPeriodEnd : r.privateMonthsAfterPeriodEnd;\n      let due = addMonths(periodEnd, normalMonths, true);\n      if (first) {\n        if (/-02-29$/.test(incorporated)) {\n          flags.push('Incorporated on 29 February: the first-accounts deadline depends on how the first anniversary (28 February or 1 March) is treated, and the kit works from the incorporation date. Needs human confirmation.');\n        }\n        const anniversary = addMonths(incorporated, r.standardPeriodMonths, false).date;\n        const periodOverTwelveMonths = anniversary !== null && periodEnd >= anniversary;\n        if (periodOverTwelveMonths) {\n          const fromInc = addMonths(incorporated, type === 'public' ? fa.publicMonthsAfterIncorporation : fa.privateMonthsAfterIncorporation, false);\n          const fromEnd = addMonths(periodEnd, fa.minimumMonthsAfterPeriodEnd, true);\n          if (fromInc.date && fromEnd.date) {\n            const useInc = fromInc.date >= fromEnd.date;\n            due = useInc ? fromInc : fromEnd;\n            notes.push('First accounts covering more than 12 months: the longer of the months after incorporation and 3 months after the period end.');\n          }\n        }\n      }\n      if (due.clamped) flags.push('The corresponding date does not exist in the deadline month, so the last day of that month was used. The guidance does not cover this case. Needs human confirmation.');\n      calc = { date: due.date, periodEnd, flags, notes };\n    }\n    if (!calc) calc = { date: null, periodEnd, flags, notes };\n  }\n\n  return choose('accounts', acc.nextDue || null, company.accountsDueOverride, calc,\n    acc.nextMadeUpTo || company.periodEnd || (calc && calc.periodEnd) || null, acc.overdue);\n}\n\n/**\n * Confirmation statement deadline. The first review period is the 12 months\n * beginning with the day of incorporation, so it ends the day before the first\n * anniversary; later ones start the day after the previous confirmation date and\n * last 12 months. The statement can be filed up to 14 days after the period ends.\n */\nfunction confirmationDeadline(company, profile, rules) {\n  const cs = (profile.ok && profile.confirmationStatement) || {};\n  const r = rules.confirmationStatement;\n  let calc = null;\n  const needCalc = !cs.nextDue && !company.csDueOverride;\n\n  if (needCalc) {\n    const flags = [];\n    const notes = [];\n    let reviewEnd = cs.nextMadeUpTo || null;\n    if (!reviewEnd) {\n      const last = company.lastCs || cs.lastMadeUpTo || null;\n      const incorporated = company.incorporated || (profile.ok ? profile.incorporated : null) || null;\n      if (last) {\n        // Later statements (s853A(5)(b) and (6)): the next review period starts the day\n        // after the last confirmation date and lasts 12 months, so it ends on the day\n        // before that start's anniversary. `last` must be the confirmation date on the\n        // last statement, not its due date or filing date.\n        const start = addDays(last, 1);\n        const anniversary = start ? addMonths(start, r.reviewPeriodMonths, false) : { date: null };\n        if (anniversary.clamped) {\n          // A period beginning on 29 February: the statute does not say how it ends.\n          // It is taken to end on 28 February, as for a first period (see R-14).\n          flags.push('The review period begins on 29 February, so its end was taken as 28 February. Needs human confirmation.');\n          reviewEnd = anniversary.date;\n        } else {\n          reviewEnd = anniversary.date ? addDays(anniversary.date, -1) : null;\n        }\n      } else if (incorporated) {\n        // First statement: the 12 months begin on the day of incorporation (s853A(5)(a)),\n        // so the period ends the day before the first anniversary.\n        const anniversary = addMonths(incorporated, r.reviewPeriodMonths, false);\n        if (anniversary.clamped) {\n          flags.push('Incorporated on 29 February: the review period end was taken as 28 February. Needs human confirmation.');\n          reviewEnd = anniversary.date;\n        } else {\n          reviewEnd = anniversary.date ? addDays(anniversary.date, -1) : null;\n        }\n      } else {\n        flags.push('No last confirmation date or incorporation date to work from. Needs human confirmation.');\n      }\n    }\n    if (reviewEnd) {\n      const due = addDays(reviewEnd, r.filingDaysAfterReviewPeriodEnd);\n      calc = { date: due, periodEnd: reviewEnd, flags, notes };\n    } else {\n      calc = { date: null, periodEnd: null, flags, notes };\n    }\n  }\n\n  return choose('confirmationStatement', cs.nextDue || null, company.csDueOverride, calc,\n    cs.nextMadeUpTo || (calc && calc.periodEnd) || null, cs.overdue);\n}\n\n// ---- copy.js ----\n// Wording. Plain text, UK English, no emoji. Everything addressed to the\n// practice is a digest; anything addressed to a client is a draft that a person\n// reads and sends from their own mailbox. This kit sends no client email.\n\n\nconst REGISTER_URL = 'https://find-and-update.company-information.service.gov.uk/company/';\n\nfunction dueWords(days) {\n  if (days < 0) return `${-days} day${days === -1 ? '' : 's'} OVERDUE`;\n  if (days === 0) return 'due today';\n  if (days === 1) return 'due tomorrow';\n  return `due in ${days} days`;\n}\n\nfunction sourceLabel(source) {\n  if (source === 'companies-house') return 'Companies House';\n  if (source === 'sheet') return 'typed into your sheet';\n  if (source === 'calculated') return 'calculated from your sheet';\n  return 'unknown';\n}\n\n/** A draft message for a person to review and send. Never sent by the workflow. */\nfunction buildClientDraft(item, config) {\n  const plural = item.kind === 'accounts';\n  const what = plural ? 'annual accounts' : 'confirmation statement';\n  const was = plural ? 'were' : 'was';\n  const is = plural ? 'are' : 'is';\n  const lines = [\n    `Subject: ${item.companyName || 'Your company'}: ${what} due ${formatUKDate(item.dueDate)}`,\n    '',\n    ...(item.needsConfirmation ? ['[STAFF: this date has not been confirmed against the Companies House register. Confirm it, then delete this line, before sending.]', ''] : []),\n    'Dear client,',\n    '',\n    item.days < 0\n      ? `Our records show that the ${what} for ${item.companyName || 'your company'} (company number ${item.companyNumber}) ${was} due on ${formatUKDate(item.dueDate)} and may now be overdue.`\n      : `Our records show that the ${what} for ${item.companyName || 'your company'} (company number ${item.companyNumber}) ${is} due at Companies House on ${formatUKDate(item.dueDate)}.`,\n    '',\n    item.days < 0\n      ? 'Please get in touch as soon as you can so that we can arrange what is needed.'\n      : 'Please get in touch as soon as you can so that we can arrange what is needed before the deadline.',\n    '',\n    'Kind regards,',\n    config.firmName || 'Your Firm',\n  ];\n  return lines.join('\\n');\n}\n\nfunction buildDigest({ reminders, attention, runDate, config, summary }) {\n  const prefix = config.dryRun ? '[DRY RUN] ' : '';\n  const needCheck = reminders.filter((r) => r.needsConfirmation).length;\n  const subject = `${prefix}Companies House deadlines: ${reminders.length} reminder${reminders.length === 1 ? '' : 's'}`\n    + `${attention.length ? `, ${attention.length} to check` : ''} (${formatUKDate(runDate)})`;\n\n  const out = [];\n  if (config.dryRun) {\n    out.push('DRY RUN. This is a preview. Nothing has been recorded, so the same reminders will appear again until dry run is switched off.');\n  }\n  out.push('Nothing has been filed with Companies House and nothing has been sent to any client. This is a list for your team to act on.');\n  out.push('');\n\n  out.push(`REMINDERS (${reminders.length})`);\n  if (reminders.length === 0) out.push('None today.');\n  for (const r of reminders) {\n    out.push('');\n    out.push(`${r.companyName || '(no name)'} (${r.companyNumber}) - ${KIND_LABEL[r.kind]}`);\n    out.push(`  Deadline: ${formatUKDate(r.dueDate)}, ${dueWords(r.days)}`);\n    out.push(`  Date from: ${sourceLabel(r.source)}`);\n    out.push(`  Check on the register: ${REGISTER_URL}${r.companyNumber}`);\n    if (r.needsConfirmation) {\n      for (const f of r.flags) out.push(`  NEEDS HUMAN CONFIRMATION: ${f}`);\n    }\n    if (r.draft) {\n      out.push('  Draft client message (not sent, edit before use):');\n      out.push(`  To: ${r.draftTo || '(no valid contact email in the sheet)'}`);\n      for (const line of r.draft.split('\\n')) out.push(`  | ${line}`);\n    }\n  }\n\n  if (attention.length) {\n    out.push('');\n    out.push(`NEEDS YOUR ATTENTION (${attention.length})`);\n    for (const a of attention) {\n      out.push(`- ${a.companyName || '(no name)'}${a.companyNumber ? ` (${a.companyNumber})` : ''}: ${a.reason}`);\n    }\n  }\n\n  out.push('');\n  out.push(`Checked ${summary.rowsRead} row${summary.rowsRead === 1 ? '' : 's'}; ${summary.skipped} not reminded (paused, not yet in a reminder window, already reminded or no longer on the register).`);\n  if (needCheck) out.push(`${needCheck} reminder${needCheck === 1 ? '' : 's'} above need${needCheck === 1 ? 's' : ''} human confirmation before anyone relies on the date.`);\n  if (config.configWarnings && config.configWarnings.length) {\n    out.push('');\n    for (const w of config.configWarnings) out.push(`Configuration note: ${w}`);\n  }\n  out.push('');\n  out.push('Deadlines are worked out from published GOV.UK guidance and the Companies House record. They are not legal advice. Confirm on the register before relying on any date.');\n  return { subject, body: out.join('\\n') };\n}\n\n// ---- config.js ----\n/**\n * Defaults for the tracker. Everything a practice would reasonably want to\n * change lives here, is passed in from the workflow's Build Config node, and is\n * covered by tests. Nothing behavioural is read from the environment directly.\n * The statutory numbers are not here: they are in rules/deadline-rules.json.\n */\nconst DEFAULT_CONFIG = {\n  // Days before a deadline at which a reminder is raised.\n  milestones: [30, 14, 7, 1],\n\n  // Once a deadline has passed, remind again every this many days.\n  overdueRepeatDays: 7,\n\n  // Day of the week (0 = Sunday, 1 = Monday) on which a digest is sent even if\n  // no reminder is due, so rows that need checking are not left for ever.\n  // null switches this off.\n  attentionDigestWeekday: 1,\n\n  firmName: 'Your Firm',\n\n  // The reminder digest goes to the practice, never to a client.\n  practiceEmail: '',\n  senderEmail: 'accounts@example.co.uk',\n\n  // Add a draft client message under each reminder, for the practice to read\n  // and send itself. The kit never sends it.\n  includeClientDrafts: true,\n\n  // Safety. While true, the digest is labelled as a preview, goes to\n  // dryRunRecipient (or the practice mailbox) and nothing is recorded in the\n  // Sent Log, so switching it off later does not lose a single reminder.\n  dryRun: true,\n  dryRunRecipient: '',\n\n  rules: {\n  \"validAsOf\": \"2026-10-05\",\n  \"sources\": {\n    \"accountsGuidance\": \"https://www.gov.uk/government/publications/filing-your-companies-house-accounts/life-of-a-company-part-1-accounts\",\n    \"accountsOverview\": \"https://www.gov.uk/prepare-file-annual-accounts-for-limited-company\",\n    \"confirmationStatementGuidance\": \"https://www.gov.uk/guidance/confirmation-statement-guidance\"\n  },\n  \"accounts\": {\n    \"privateMonthsAfterPeriodEnd\": 9,\n    \"publicMonthsAfterPeriodEnd\": 6,\n    \"standardPeriodMonths\": 12,\n    \"firstAccounts\": {\n      \"privateMonthsAfterIncorporation\": 21,\n      \"publicMonthsAfterIncorporation\": 18,\n      \"minimumMonthsAfterPeriodEnd\": 3\n    }\n  },\n  \"confirmationStatement\": {\n    \"reviewPeriodMonths\": 12,\n    \"filingDaysAfterReviewPeriodEnd\": 14\n  },\n  \"companyStatus\": {\n    \"remindFor\": [\"active\"],\n    \"suppress\": [\"dissolved\", \"closed\", \"converted-closed\", \"removed\"]\n  },\n  \"companyType\": {\n    \"private\": [\"ltd\", \"private\", \"private limited\", \"private limited company\", \"limited\", \"private-ltd\"],\n    \"public\": [\"plc\", \"public\", \"public limited\", \"public limited company\"]\n  },\n  \"api\": {\n    \"baseUrl\": \"https://api.company-information.service.gov.uk\",\n    \"requestsPerFiveMinutes\": 600\n  }\n},\n};\n\nfunction sanitiseMilestones(value, warnings) {\n  const ok = Array.isArray(value)\n    && value.length > 0\n    && value.every((n) => Number.isInteger(n) && n >= 1 && n <= 366);\n  if (!ok) {\n    warnings.push('Reminder milestones were not a list of whole numbers of days, so the defaults were used.');\n    return [...DEFAULT_CONFIG.milestones];\n  }\n  return [...new Set(value)].sort((a, b) => b - a);\n}\n\nfunction withDefaults(config) {\n  const given = config && typeof config === 'object' ? config : {};\n  const warnings = [];\n  const merged = { ...DEFAULT_CONFIG, ...given };\n  merged.milestones = sanitiseMilestones(given.milestones === undefined ? DEFAULT_CONFIG.milestones : given.milestones, warnings);\n  if (!Number.isInteger(merged.overdueRepeatDays) || merged.overdueRepeatDays < 1) {\n    warnings.push('overdueRepeatDays was not a positive whole number, so 7 was used.');\n    merged.overdueRepeatDays = 7;\n  }\n  const wd = merged.attentionDigestWeekday;\n  if (wd !== null && !(Number.isInteger(wd) && wd >= 0 && wd <= 6)) {\n    warnings.push('attentionDigestWeekday must be 0 to 6 or null, so Monday was used.');\n    merged.attentionDigestWeekday = 1;\n  }\n  // Only the exact boolean false turns the safety off.\n  merged.dryRun = merged.dryRun !== false;\n  merged.includeClientDrafts = merged.includeClientDrafts !== false;\n  merged.rules = given.rules && typeof given.rules === 'object' ? given.rules : DEFAULT_CONFIG.rules;\n  merged.configWarnings = warnings;\n  return merged;\n}\n\n// ---- plan.js ----\n// The one decision function. Given the sheet rows with whatever Companies House\n// returned for each, the run date, the config and the keys of reminders already\n// logged, it returns everything the workflow needs: the digest, the rows to log\n// and a summary. It performs no I/O, reads no n8n globals and never throws.\n// Anything it cannot handle comes back in `attention`, not as an exception.\n\n\n\n\n\n\nfunction emptySummary(runDate, cfg) {\n  return {\n    runDate: runDate || null,\n    rowsRead: 0,\n    emptyRows: 0,\n    reminders: 0,\n    attention: 0,\n    skipped: 0,\n    lookupFailures: 0,\n    lookupsAttempted: 0,\n    lookupsAllFailed: false,\n    failRun: false,\n    failReason: '',\n    dryRun: cfg.dryRun,\n    halted: false,\n    haltReason: '',\n    digestTo: '',\n    sendDigest: false,\n  };\n}\n\nfunction halted(runDate, cfg, reason) {\n  const summary = emptySummary(runDate, cfg);\n  summary.halted = true;\n  summary.haltReason = reason;\n  summary.failRun = true;\n  summary.failReason = reason;\n  return { summary, reminders: [], attention: [], skipped: [], sentLogRows: [], digest: { subject: '', body: '' } };\n}\n\nfunction keyFor(number, kind, dueDate, band) {\n  return `${number}|${kind}|${dueDate}|${band}`;\n}\n\nfunction evaluateCompany(entry, ctx) {\n  const { today, cfg, sentSet, seenNumbers, out } = ctx;\n  const rowObj = entry && typeof entry === 'object' && entry.row && typeof entry.row === 'object' ? entry.row : null;\n\n  if (!rowObj || isEmptyRow(rowObj)) { out.summary.emptyRows += 1; return; }\n  out.summary.rowsRead += 1;\n\n  const rules = cfg.rules;\n  const company = readCompanyRow(rowObj, rules);\n  const who = { companyName: company.name, companyNumber: company.number.number };\n  const attend = (reason) => out.attention.push({ ...who, reason });\n  const skip = (reason) => out.skipped.push({ ...who, reason });\n\n  if (company.paused) { skip('paused in the sheet'); return; }\n  for (const p of company.problems) attend(p);\n\n  if (!company.number.valid) {\n    attend(`${company.number.reason}. Needs human confirmation.`);\n    skip('no usable company number');\n    return;\n  }\n  if (seenNumbers.has(company.number.number)) {\n    attend('appears more than once in the sheet; only the first row is used');\n    skip('duplicate company number');\n    return;\n  }\n  seenNumbers.add(company.number.number);\n  if (company.number.padded) {\n    attend(`company number was padded with leading zeros to ${company.number.number}; fix the column format in the sheet so it is stored as text`);\n  }\n\n  if (entry.api !== null && entry.api !== undefined) out.summary.lookupsAttempted += 1;\n  let profile = readApiProfile(entry.api);\n  if (profile.ok && profile.number !== company.number.number) {\n    // A response for a different company (or with no number) must never be applied.\n    profile = { ok: false, reason: `Companies House returned ${profile.number ? `number ${profile.number}` : 'no company number'}, not ${company.number.number}, so the response was discarded` };\n  }\n  if (!profile.ok) {\n    out.summary.lookupFailures += 1;\n    attend(`${profile.reason}. Using the sheet only; deadlines are not cross-checked.`);\n  } else {\n    const action = statusAction(profile.status, rules);\n    if (action === 'suppress') { skip(`company status is ${profile.status}`); return; }\n    if (action === 'review') {\n      attend(`company status is \"${profile.status || 'unknown'}\", so no reminders are raised. Needs human confirmation.`);\n      skip('company status needs review');\n      return;\n    }\n  }\n\n  let type = company.type;\n  if (profile.ok && profile.type) {\n    if (company.type && company.type !== profile.type) {\n      attend(`sheet says ${company.type} but Companies House says ${profile.type}; Companies House is used. Needs human confirmation.`);\n    }\n    type = profile.type;\n  } else if (profile.ok && !company.type) {\n    attend(`Companies House company type \"${profile.rawType || 'unknown'}\" is not one this kit applies accounts rules to. Needs human confirmation.`);\n  }\n\n  const name = company.name || (profile.ok ? profile.name : '');\n  const deadlines = [\n    accountsDeadline(company, profile, type, rules),\n    confirmationDeadline(company, profile, rules),\n  ];\n\n  let reminded = 0;\n  for (const d of deadlines) {\n    if (!d.dueDate) {\n      attend(`${d.kind === 'accounts' ? 'Accounts' : 'Confirmation statement'} deadline could not be worked out: ${d.flags.join(' ')}`);\n      continue;\n    }\n    if (d.discrepancy) attend(`${d.kind === 'accounts' ? 'Accounts' : 'Confirmation statement'}: ${d.flags[0]}`);\n    const days = daysBetween(today, d.dueDate);\n    const band = bandFor(days, cfg.milestones, cfg.overdueRepeatDays);\n    if (!band) continue;\n    const key = keyFor(company.number.number, d.kind, d.dueDate, band.band);\n    if (sentSet.has(key)) continue;\n    const item = {\n      companyName: name,\n      companyNumber: company.number.number,\n      kind: d.kind,\n      dueDate: d.dueDate,\n      days,\n      band: band.band,\n      overdue: band.overdue,\n      source: d.source,\n      flags: d.flags,\n      needsConfirmation: d.needsConfirmation,\n      idempotencyKey: key,\n      draft: '',\n      draftTo: '',\n    };\n    if (cfg.includeClientDrafts) {\n      item.draft = buildClientDraft(item, cfg);\n      item.draftTo = isValidEmail(company.email) ? company.email : '';\n    }\n    out.reminders.push(item);\n    reminded += 1;\n  }\n  if (reminded === 0) skip('no deadline is in a reminder window, or already reminded');\n}\n\n/**\n * Reads the idempotency keys out of Sent Log rows. If the log has content but no\n * key can be found (a renamed header, say) it reports a problem instead of\n * returning an empty list, which would repeat every reminder every day.\n * Returns { keys, problem }; problem is '' when the log is fine or truly empty.\n */\nfunction sentLogKeys(rows) {\n  const list = Array.isArray(rows) ? rows : [];\n  const keys = list\n    .map((r) => String(r && typeof r === 'object' ? (r['Idempotency Key'] ?? '') : '').trim())\n    .filter(Boolean);\n  const hasContent = list.some((r) => r && typeof r === 'object'\n    && Object.entries(r).some(([k, v]) => k !== 'row_number' && String(v ?? '').trim() !== ''));\n  if (hasContent && keys.length === 0) {\n    return { keys, problem: 'the Sent Log has data but no \"Idempotency Key\" column was found. Check the header spelling against templates/Sent Log.csv' };\n  }\n  return { keys, problem: '' };\n}\n\n/**\n * @param {object} input\n * @param {Array<{row: object, api: object|null}>} input.companies\n * @param {string} input.today  'YYYY-MM-DD' in Europe/London\n * @param {object} input.config\n * @param {string[]} input.sentKeys  idempotency keys already in the Sent Log\n */\nfunction plan(input) {\n  let cfg = withDefaults(null);\n  try {\n    const { companies, today, config, sentKeys } = input && typeof input === 'object' ? input : {};\n    cfg = withDefaults(config);\n\n    if (tsOf(today) === null) return halted(today, cfg, `the run date \"${String(today)}\" is not a valid date`);\n    const problems = rulesProblems(cfg.rules);\n    if (problems.length) return halted(today, cfg, problems.join('; '));\n\n    const out = {\n      summary: emptySummary(today, cfg),\n      reminders: [],\n      attention: [],\n      skipped: [],\n      sentLogRows: [],\n      digest: { subject: '', body: '' },\n    };\n    const sentSet = new Set((Array.isArray(sentKeys) ? sentKeys : []).map((k) => String(k ?? '').trim()).filter(Boolean));\n    const seenNumbers = new Set();\n    const list = Array.isArray(companies) ? companies : [];\n\n    for (const entry of list) {\n      try {\n        evaluateCompany(entry, { today, cfg, sentSet, seenNumbers, out });\n      } catch (err) {\n        out.attention.push({\n          companyName: '',\n          companyNumber: '',\n          reason: 'a row could not be processed and was skipped. Needs human confirmation.',\n        });\n      }\n    }\n\n    out.reminders.sort((a, b) => a.days - b.days\n      || a.companyNumber.localeCompare(b.companyNumber)\n      || a.kind.localeCompare(b.kind));\n    out.skipped.sort((a, b) => a.companyNumber.localeCompare(b.companyNumber));\n\n    const s = out.summary;\n    if (s.lookupsAttempted > 0 && s.lookupFailures >= s.lookupsAttempted) {\n      s.lookupsAllFailed = true;\n      s.failRun = true;\n      s.failReason = 'every Companies House lookup failed (check the API key and credential); dates came from the sheet only';\n    }\n    if (s.rowsRead === 0) {\n      // An empty or wrong Companies tab, or a wrong sheet id, must not look like a quiet day.\n      out.attention.push({ companyName: '', companyNumber: '', reason: 'no company rows were read. Check the Companies tab name, its headers and the sheet id.' });\n      s.failRun = true;\n      s.failReason = s.failReason || 'no company rows were read (check the Companies tab, its headers and the sheet id)';\n    }\n    s.reminders = out.reminders.length;\n    s.attention = out.attention.length;\n    s.skipped = out.skipped.length;\n\n    const to = cfg.dryRun ? (cfg.dryRunRecipient || cfg.practiceEmail) : cfg.practiceEmail;\n    s.digestTo = isValidEmail(to) ? String(to).trim() : '';\n    const weekdayHit = cfg.attentionDigestWeekday !== null && dayOfWeek(today) === cfg.attentionDigestWeekday;\n    const worthSending = out.reminders.length > 0 || (out.attention.length > 0 && weekdayHit);\n    if (worthSending && !s.digestTo) {\n      s.halted = true;\n      s.haltReason = 'there is something to report but no valid practice email address is configured';\n      s.failRun = true;\n      s.failReason = s.haltReason;\n    }\n    s.sendDigest = worthSending && s.digestTo !== '';\n\n    if (s.sendDigest) {\n      out.digest = buildDigest({\n        reminders: out.reminders, attention: out.attention, runDate: today, config: cfg, summary: s,\n      });\n      // Dry run records nothing, so that going live later loses no reminder.\n      if (!cfg.dryRun) {\n        out.sentLogRows = out.reminders.map((r) => ({\n          'Idempotency Key': r.idempotencyKey,\n          'Company Number': r.companyNumber,\n          'Company Name': r.companyName,\n          'Deadline Type': r.kind,\n          'Due Date': r.dueDate,\n          Band: r.band,\n          'Reported On': today,\n        }));\n      }\n    }\n    return out;\n  } catch (err) {\n    return halted(input && input.today, cfg, 'unexpected error while planning; nothing was sent');\n  }\n}\n\n// ---- n8n entry point ----\nconst cfgItem = $('Build Config').first().json;\n\n// Each input item is one company: { row, api }. Companies House failures arrive\n// as an error object in `api`, never as a stopped run.\nconst companies = $input.all().map((i) => i.json);\n\n// No try/catch: a Sent Log that cannot be read must stop the run, not look empty.\nconst logCheck = sentLogKeys($('Read Sent Log').all().map((i) => i.json));\nif (logCheck.problem) throw new Error(logCheck.problem);\nconst sentKeys = logCheck.keys;\n\nconst result = plan({ companies, today: cfgItem.today, config: cfgItem.config, sentKeys });\n\nreturn [{\n  json: {\n    summary: result.summary,\n    digestTo: result.summary.digestTo,\n    digestSubject: result.digest.subject,\n    digestBody: result.digest.body,\n    sendDigest: result.summary.sendDigest,\n    sentLogRows: result.sentLogRows,\n  },\n  pairedItem: { item: 0 },\n}];"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "if-digest",
+      "name": "Digest Needed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        -120
+      ],
       "parameters": {
         "conditions": {
           "options": {
             "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict"
+            "version": 2
           },
           "conditions": [
             {
-              "id": "cond-1",
-              "leftValue": "={{ [30, 14, 7, 1].includes($json.confirmationStatementDaysRemaining) || [30, 14, 7, 1].includes($json.accountsDaysRemaining) }}",
-              "rightValue": true,
+              "id": "d1",
               "operator": {
                 "type": "boolean",
-                "operation": "true"
-              }
+                "operation": "true",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json.sendDigest }}",
+              "rightValue": ""
             }
           ],
           "combinator": "and"
         },
         "options": {}
-      },
-      "id": "c3d4e5f6-0006-4000-8000-000000000006",
-      "name": "Filter: Deadline Approaching",
-      "type": "n8n-nodes-base.filter",
-      "typeVersion": 2.2,
-      "position": [1400, 300]
+      }
     },
     {
-      "parameters": {
-        "jsCode": "const results = [];\nfor (const item of $input.all()) {\n  const row = item.json;\n  const reminders = [];\n\n  if ([30, 14, 7, 1].includes(row.confirmationStatementDaysRemaining)) {\n    reminders.push(`Confirmation Statement due ${row.confirmationStatementDue} (${row.confirmationStatementDaysRemaining} day(s) away) — must be filed within 14 days of the review period end.`);\n  }\n  if ([30, 14, 7, 1].includes(row.accountsDaysRemaining)) {\n    reminders.push(`Annual Accounts due ${row.accountsDue} (${row.accountsDaysRemaining} day(s) away).`);\n  }\n\n  const subject = `Companies House Deadline Reminder – ${row['Company Name']} (${row['Company Number']})`;\n  const body = `Hi team,\\n\\nThe following Companies House deadline(s) are approaching for ${row['Company Name']} (Company No. ${row['Company Number']}):\\n\\n` +\n    reminders.map(r => `  - ${r}`).join('\\n') +\n    `\\n\\nCurrent company status per Companies House: ${row.companyStatus}.\\n\\nPlease action or confirm with the client as needed.\\n\\nKind regards,\\nCompliance Tracker`;\n\n  results.push({ json: { ...row, emailSubject: subject, emailBody: body } });\n}\nreturn results;"
-      },
-      "id": "c3d4e5f6-0007-4000-8000-000000000007",
-      "name": "Draft Reminder Content",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1640, 300]
-    },
-    {
-      "parameters": {
-        "fromEmail": "={{ $env.SENDER_EMAIL }}",
-        "toEmail": "={{ $env.COMPLIANCE_TEAM_EMAIL }}",
-        "subject": "={{ $json.emailSubject }}",
-        "emailFormat": "text",
-        "text": "={{ $json.emailBody }}",
-        "options": {}
-      },
-      "id": "c3d4e5f6-0008-4000-8000-000000000008",
-      "name": "Send Reminder Email",
+      "id": "send-digest",
+      "name": "Email Digest To Practice",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
-      "position": [1880, 300]
+      "position": [
+        1320,
+        -200
+      ],
+      "parameters": {
+        "fromEmail": "={{ $('Build Config').first().json.config.senderEmail }}",
+        "toEmail": "={{ $('Plan Run').first().json.digestTo }}",
+        "subject": "={{ $('Plan Run').first().json.digestSubject }}",
+        "text": "={{ $('Plan Run').first().json.digestBody }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 1
+    },
+    {
+      "id": "rows-to-write",
+      "name": "Rows For Sent Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        -200
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// GENERATED FILE. Do not edit this node in the n8n editor.\n// Source: kits/uk-accountancy/03-companies-house-deadline-tracker/src/core/\n// Rebuild with `npm run build`. CI fails if this drifts from the source.\n\n// Runs only after the digest email has been sent. A failed send therefore\n// records nothing, and the same reminders are raised again on the next run.\n// In dry run the plan holds no rows, so nothing is written.\n// With nothing to record (dry run, or an attention-only digest) it emits one\n// marker item so the run still reaches the Run Log; the next node routes it past\n// the Sent Log append.\nconst rows = $('Plan Run').first().json.sentLogRows || [];\nif (rows.length === 0) return [{ json: { hasRows: false }, pairedItem: { item: 0 } }];\nreturn rows.map((row) => ({\n  json: { ...row, hasRows: true, 'Reported At': new Date().toISOString() },\n  pairedItem: { item: 0 },\n}));"
+      }
+    },
+    {
+      "id": "append-sent",
+      "name": "Append To Sent Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1860,
+        -200
+      ],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Build Config').first().json.sheetId }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sent Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Idempotency Key": "={{ $json[\"Idempotency Key\"] }}",
+            "Company Number": "={{ $json[\"Company Number\"] }}",
+            "Company Name": "={{ $json[\"Company Name\"] }}",
+            "Deadline Type": "={{ $json[\"Deadline Type\"] }}",
+            "Due Date": "={{ $json[\"Due Date\"] }}",
+            "Band": "={{ $json.Band }}",
+            "Reported On": "={{ $json[\"Reported On\"] }}",
+            "Reported At": "={{ $json[\"Reported At\"] }}"
+          }
+        },
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "if-rows",
+      "name": "Has Rows To Record",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1640,
+        -200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "h1",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json.hasRows }}",
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "stop-sentlog",
+      "name": "Sent Log Write Failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        -60
+      ],
+      "parameters": {
+        "errorType": "errorMessage",
+        "errorMessage": "Companies House tracker: digest sent but Sent Log not written - next run will re-send the same reminders to the practice. No Run Log row was written. Add the missing Sent Log rows by hand to prevent the repeat."
+      }
+    },
+    {
+      "id": "log-run",
+      "name": "Append Run Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1320,
+        40
+      ],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Build Config').first().json.sheetId }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Run Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Run At": "={{ $now.toISO() }}",
+            "Run Date": "={{ $('Plan Run').first().json.summary.runDate }}",
+            "Rows Read": "={{ $('Plan Run').first().json.summary.rowsRead }}",
+            "Reminders": "={{ $('Plan Run').first().json.summary.reminders }}",
+            "Needs Attention": "={{ $('Plan Run').first().json.summary.attention }}",
+            "Skipped": "={{ $('Plan Run').first().json.summary.skipped }}",
+            "Lookup Failures": "={{ $('Plan Run').first().json.summary.lookupFailures }}",
+            "Dry Run": "={{ $('Plan Run').first().json.summary.dryRun }}",
+            "Digest Sent": "false",
+            "Digest Planned": "={{ $('Plan Run').first().json.summary.sendDigest }}",
+            "Note": "={{ $('Plan Run').first().json.summary.failReason || 'ok' }}"
+          }
+        },
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "log-run-sent",
+      "name": "Append Run Log After Send",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2100,
+        -300
+      ],
+      "executeOnce": true,
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Build Config').first().json.sheetId }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Run Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Run At": "={{ $now.toISO() }}",
+            "Run Date": "={{ $('Plan Run').first().json.summary.runDate }}",
+            "Rows Read": "={{ $('Plan Run').first().json.summary.rowsRead }}",
+            "Reminders": "={{ $('Plan Run').first().json.summary.reminders }}",
+            "Needs Attention": "={{ $('Plan Run').first().json.summary.attention }}",
+            "Skipped": "={{ $('Plan Run').first().json.summary.skipped }}",
+            "Lookup Failures": "={{ $('Plan Run').first().json.summary.lookupFailures }}",
+            "Dry Run": "={{ $('Plan Run').first().json.summary.dryRun }}",
+            "Digest Sent": "true",
+            "Digest Planned": "={{ $('Plan Run').first().json.summary.sendDigest }}",
+            "Note": "={{ $('Plan Run').first().json.summary.failReason || 'ok' }}"
+          }
+        },
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "if-fail",
+      "name": "Run Needs Attention",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        40
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f1",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "leftValue": "={{ $('Plan Run').first().json.summary.failRun }}",
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "stop-fail",
+      "name": "Stop And Report",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1980,
+        40
+      ],
+      "parameters": {
+        "errorType": "errorMessage",
+        "errorMessage": "={{ 'Companies House tracker: ' + $('Plan Run').first().json.summary.failReason }}"
+      }
+    },
+    {
+      "id": "sticky-1",
+      "name": "How this works",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -500,
+        -340
+      ],
+      "parameters": {
+        "width": 900,
+        "height": 220,
+        "content": "## Companies House deadline tracker\\n\\nOnce a day this checks each company in your sheet against Companies House\\n(read only) and emails **your practice** a digest of deadlines that are\\napproaching or overdue. It never files anything and never emails a client:\\nany client wording is a draft inside the digest for a person to review.\\n\\nEvery decision is made by `Plan Run`, generated from the tested source in\\n`src/core/`. Do not edit it here: run `npm run build` and re-import.\\n\\n**DRY_RUN is on by default.** The digest is marked as a preview and nothing is recorded."
+      }
     }
   ],
   "connections": {
-    "Daily Trigger 07:00": {
-      "main": [[{ "node": "Read Client Company List (Google Sheets)", "type": "main", "index": 0 }]]
+    "Daily Schedule 07:00": {
+      "main": [
+        [
+          {
+            "node": "Build Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Read Client Company List (Google Sheets)": {
-      "main": [[{ "node": "Split In Batches (per company)", "type": "main", "index": 0 }]]
+    "Build Config": {
+      "main": [
+        [
+          {
+            "node": "Read Sent Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Split In Batches (per company)": {
-      "main": [[{ "node": "Verify Company (Companies House API)", "type": "main", "index": 0 }]]
+    "Read Sent Log": {
+      "main": [
+        [
+          {
+            "node": "Read Companies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Verify Company (Companies House API)": {
-      "main": [[{ "node": "Merge & Compute Days Remaining", "type": "main", "index": 0 }]]
+    "Read Companies": {
+      "main": [
+        [
+          {
+            "node": "Prepare Companies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Merge & Compute Days Remaining": {
-      "main": [[{ "node": "Filter: Deadline Approaching", "type": "main", "index": 0 }]]
+    "Prepare Companies": {
+      "main": [
+        [
+          {
+            "node": "Per Company",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Filter: Deadline Approaching": {
-      "main": [[{ "node": "Draft Reminder Content", "type": "main", "index": 0 }]]
+    "Per Company": {
+      "main": [
+        [
+          {
+            "node": "Plan Run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Needs Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Draft Reminder Content": {
-      "main": [[{ "node": "Send Reminder Email", "type": "main", "index": 0 }]]
+    "Needs Lookup": {
+      "main": [
+        [
+          {
+            "node": "Companies House Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Lookup": {
+      "main": [
+        [
+          {
+            "node": "Per Company",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Companies House Lookup": {
+      "main": [
+        [
+          {
+            "node": "Rate Limit Pause",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rate Limit Pause": {
+      "main": [
+        [
+          {
+            "node": "Collect Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Result": {
+      "main": [
+        [
+          {
+            "node": "Per Company",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan Run": {
+      "main": [
+        [
+          {
+            "node": "Digest Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Digest Needed": {
+      "main": [
+        [
+          {
+            "node": "Email Digest To Practice",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Append Run Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Digest To Practice": {
+      "main": [
+        [
+          {
+            "node": "Rows For Sent Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rows For Sent Log": {
+      "main": [
+        [
+          {
+            "node": "Has Rows To Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Rows To Record": {
+      "main": [
+        [
+          {
+            "node": "Append To Sent Log",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Append Run Log After Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append To Sent Log": {
+      "main": [
+        [
+          {
+            "node": "Append Run Log After Send",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sent Log Write Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Run Log": {
+      "main": [
+        [
+          {
+            "node": "Run Needs Attention",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Run Log After Send": {
+      "main": [
+        [
+          {
+            "node": "Run Needs Attention",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Needs Attention": {
+      "main": [
+        [
+          {
+            "node": "Stop And Report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
     }
   },
   "active": false,
-  "settings": {},
-  "id": "companies-house-deadline-tracker-003",
-  "tags": ["uk-accountancy", "companies-house", "compliance"]
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/London",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "executionTimeout": 900
+  },
+  "tags": [
+    "uk-accountancy",
+    "companies-house"
+  ],
+  "meta": {
+    "generatedBy": "scripts/build-workflow.js",
+    "builtFrom": "src/core"
+  }
 }

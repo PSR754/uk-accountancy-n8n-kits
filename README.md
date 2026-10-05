@@ -13,7 +13,7 @@ Want help putting these to work in your practice? See [Work with me](#work-with-
 | --- | --- |
 | [01-hmrc-deadline-reminders](kits/uk-accountancy/01-hmrc-deadline-reminders) | **Verified** (157 tests, plus a live n8n check of its loop and error handling). Staged email reminders at 30, 14, 7 and 1 days before each deadline in your Google Sheet, with a preview before anything sends, one email per client, and no deadline rules baked in. Reminds only; never files anything. |
 | [02-mtd-vat-reminders](kits/uk-accountancy/02-mtd-vat-reminders) | Calculates MTD VAT submission deadlines and sends a pre-submission digital records checklist to clients. |
-| [03-companies-house-deadline-tracker](kits/uk-accountancy/03-companies-house-deadline-tracker) | Tracks Confirmation Statement and Annual Accounts deadlines, cross-checked against the Companies House public API. |
+| [03-companies-house-deadline-tracker](kits/uk-accountancy/03-companies-house-deadline-tracker) | **Tested core (138 tests); some rules awaiting sign-off (see its RULES.md).** Tracks Confirmation Statement and Annual Accounts deadlines from GOV.UK-documented rules, cross-checked against the read-only Companies House API. Emails your practice a digest with draft client wording; never files anything and never emails a client. Dry run by default. |
 | [04-invoice-payment-chasing](kits/uk-accountancy/04-invoice-payment-chasing) | **Tested core; statutory rules awaiting sign-off (see its RULES.md).** Escalating GBP invoice chase emails with a preview before anything sends, one email per client, and statutory wording only where it applies. |
 | [05-client-onboarding](kits/uk-accountancy/05-client-onboarding) | Form-triggered new client onboarding: AML/ID checklist, draft engagement letter, welcome email and HMRC 64-8 follow-up. |
 | [06-client-document-collection](kits/uk-accountancy/06-client-document-collection) | Chases clients for outstanding year-end/tax documents and tracks receipt against a per-job checklist. |
@@ -42,15 +42,16 @@ Want help putting these to work in your practice? See [Work with me](#work-with-
 
 ## Status
 
-Kits 01 and 04 have been rebuilt around a tested core and are the reference for
-how the rest will follow. The other eight are as first written and have known defects.
+Kits 01, 03 and 04 have been rebuilt around a tested core and are the reference
+for how the rest will follow. The other seven are as first written and have
+known defects.
 
-| | Kits 01 and 04 | Kits 02, 03, 05-10 |
+| | Kits 01, 03 and 04 | Kits 02, 05-10 |
 |---|---|---|
 | Decision logic | One pure function, no I/O, never throws | Spread across Code nodes and expressions |
-| Tests | 157 and 91, no credentials needed | None |
+| Tests | 386 between them, no credentials needed | None |
 | `workflow.json` | Generated from the tested source; CI fails on drift | Hand-written |
-| Static checks | Passes | 35 errors, 46 warnings between them |
+| Static checks | Passes, 0 errors and 0 warnings | 33 errors, 40 warnings between them |
 
 Run `npm run lint` for the current report on all ten.
 
@@ -59,7 +60,7 @@ Run `npm run lint` for the current report on all ten.
 A multi-lens audit of all ten kits found defects that are invisible from reading
 the JSON and that leave a run looking successful. Among them: Google Sheets
 nodes with no `operation`, which default to reading rather than writing, so four
-kits never record anything; a Loop node wired to its "done" output, so kit 03
+kits never record anything; a Loop node wired to its "done" output, so the earlier kit 03
 has never contacted Companies House; write-back nodes reading `$json` straight
 after an email node, whose output is the SMTP result rather than the row, so
 "already chased" is never recorded and reminders repeat; and VAT deadline
@@ -71,8 +72,8 @@ same mistakes cannot return quietly as the remaining kits are rebuilt.
 ## Working on this repository
 
 ```
-npm test          # build check, lint, and 248 tests
-npm run build     # regenerate kits 01 and 04's workflow.json from src/core
+npm test          # build check, lint, and 386 tests
+npm run build     # regenerate kits 01, 03 and 04's workflow.json from src/core
 npm run lint      # static checks across every kit
 npm run drift     # compare a live n8n workflow against this repo
 ```
