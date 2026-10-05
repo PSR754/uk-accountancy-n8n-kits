@@ -1,0 +1,34 @@
+{
+  "validAsOf": "2026-10-05",
+  "sources": {
+    "accountsGuidance": "https://www.gov.uk/government/publications/filing-your-companies-house-accounts/life-of-a-company-part-1-accounts",
+    "accountsOverview": "https://www.gov.uk/prepare-file-annual-accounts-for-limited-company",
+    "confirmationStatementGuidance": "https://www.gov.uk/guidance/confirmation-statement-guidance"
+  },
+  "accounts": {
+    "privateMonthsAfterPeriodEnd": 9,
+    "publicMonthsAfterPeriodEnd": 6,
+    "standardPeriodMonths": 12,
+    "firstAccounts": {
+      "privateMonthsAfterIncorporation": 21,
+      "publicMonthsAfterIncorporation": 18,
+      "minimumMonthsAfterPeriodEnd": 3
+    }
+  },
+  "confirmationStatement": {
+    "reviewPeriodMonths": 12,
+    "filingDaysAfterReviewPeriodEnd": 14
+  },
+  "companyStatus": {
+    "remindFor": ["active"],
+    "suppress": ["dissolved", "closed", "converted-closed", "removed"]
+  },
+  "companyType": {
+    "private": ["ltd", "private", "private limited", "private limited company", "limited", "private-ltd"],
+    "public": ["plc", "public", "public limited", "public limited company"]
+  },
+  "api": {
+    "baseUrl": "https://api.company-information.service.gov.uk",
+    "requestsPerFiveMinutes": 600
+  }
+}

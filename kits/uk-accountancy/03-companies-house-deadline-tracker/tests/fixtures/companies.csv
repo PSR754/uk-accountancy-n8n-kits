@@ -1,0 +1,9 @@
+Company Name,Company Number,Company Type,Incorporation Date,Last Accounts Made Up To,Next Accounts Period End,Last Confirmation Statement Made Up To,Confirmation Statement Due,Accounts Due,Client Contact Email,Paused
+Quarter Ltd,01111111,Private,2019-03-14,2025-12-31,,2026-02-20,,,a@example.co.uk,
+Fortnight Ltd,02222222,Private,2019-03-14,2025-12-31,,2026-03-01,,,b@example.co.uk,
+Overdue Ltd,03333333,Private,2019-03-14,2024-12-31,,2025-05-01,,,c@example.co.uk,
+Public plc,SC444444,Public,2015-01-05,2025-12-31,,2026-04-20,,,d@example.co.uk,
+Paused Ltd,05555555,Private,2019-03-14,2025-12-31,,2026-03-01,,,e@example.co.uk,yes
+Typed Dates Ltd,06666666,Private,2019-03-14,,,,2026-10-12,2026-10-20,f@example.co.uk,
+Messy Ltd,7777,Private,not a date,31/13/2025,,,,,not-an-email,
+,,,,,,,,,,

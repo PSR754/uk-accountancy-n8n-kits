@@ -18,9 +18,10 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { KITS_ROOT } from './lib/bundle.js';
 import * as kit01 from './kits/01-hmrc-deadline-reminders.js';
+import * as kit03 from './kits/03-companies-house-deadline-tracker.js';
 import * as kit04 from './kits/04-invoice-payment-chasing.js';
 
-const BUILDERS = [kit01, kit04];
+const BUILDERS = [kit01, kit03, kit04];
 
 const only = process.argv.find((a) => a.startsWith('--kit='))?.split('=')[1];
 const check = process.argv.includes('--check');
