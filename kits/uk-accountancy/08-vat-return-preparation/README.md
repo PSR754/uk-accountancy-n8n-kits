@@ -2,7 +2,7 @@
 
 ## What this kit does
 
-Pulls sales and purchase transaction data for a VAT period from a bookkeeping/accounting system's API, calculates a draft VAT return (Box 1–7 style figures: output VAT, input VAT, net VAT due, total sales/purchases ex VAT), flags transactions that look like they need a human look (unusually large amounts, negative VAT, purchases above the VAT-registration threshold missing a supplier VAT number), and emails a draft summary to the reviewing accountant.
+Pulls sales and purchase transaction data for a VAT period from a bookkeeping/accounting system's API, calculates a draft VAT return (Box 1–7 style figures: output VAT, input VAT, net VAT due, total sales/purchases ex VAT), flags transactions that look like they need a human look (unusually large amounts, negative VAT, purchases missing a supplier VAT number, which any VAT invoice you reclaim on must show, including simplified invoices under £250), and emails a draft summary to the reviewing accountant.
 
 **This workflow does NOT submit anything to HMRC.** It is a preparation and review aid only — the actual submission must still be done manually through your firm's MTD-compatible bookkeeping/filing software after a qualified accountant has reviewed the draft.
 
