@@ -1,5 +1,7 @@
 # Making Tax Digital (MTD) VAT Reminder & Checklist
 
+> **Warning: do not rely on the deadlines this version calculates.** A VAT return is due one calendar month and 7 days after the period ends ([gov.uk](https://www.gov.uk/submit-vat-return)), so a period ending on the last day of a month is always due on the 7th. This version gets most month ends wrong by 1 to 3 days. For example, a period ending 31 October 2026 is shown as due 8 December 2026 instead of 7 December 2026, and 30 September is shown as due 6 November instead of 7 November. It also applies the same rule to Annual Accounting Scheme clients, whose return is due 2 months after the period ends ([gov.uk](https://www.gov.uk/vat-annual-accounting-scheme)). Check every date against your HMRC online account until the rebuilt version of this kit is released.
+
 ## What this kit does
 Calculates each VAT-registered client's MTD submission deadline (1 month + 7 days after their VAT quarter end) and emails a pre-submission checklist at 21, 14, 7 and 3 days before that deadline, covering the digital record-keeping checks MTD requires. Once a client is marked as submitted, it logs a confirmation entry and stops sending checklists for that period.
 
